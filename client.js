@@ -169,6 +169,8 @@ window.__ModuleLoader__.load({
         discover: '读取上游模型列表',
         discovering: '读取中…',
         discovered: '上游可用模型',
+        imageCapable: '可生成图片',
+        textOnly: '仅文本，无法出图',
         copy: '复制',
         copied: '已复制',
         security: '这些 Key 只写入本机配置文件（权限 0600），页面只显示掩码。',
@@ -242,6 +244,8 @@ window.__ModuleLoader__.load({
         discover: 'Read upstream models',
         discovering: 'Reading…',
         discovered: 'Models available upstream',
+        imageCapable: 'Can generate images',
+        textOnly: 'Text only — cannot generate images',
         copy: 'Copy',
         copied: 'Copied',
         security: 'Keys are written only to this machine\'s config file (mode 0600); the page shows masks only.',
@@ -544,7 +548,12 @@ window.__ModuleLoader__.load({
             models ? h('div', { style: { marginTop: 12 } },
               h('span', { className: 'dsh-pf-label' }, t('discovered')),
               h('div', { className: 'dsh-pf-row', style: { marginTop: 6 } },
-                models.map((row) => h('span', { key: row.id, className: 'dsh-pf-badge' }, row.id)))) : null,
+                models.map((row) => {
+                  // Only image-capable models can serve this plugin; mark them so the
+                  // list is actionable instead of a flat dump of every upstream model.
+                  const imageCapable = Array.isArray(row.outputModalities) && row.outputModalities.includes('image')
+                  return h('span', { key: row.id, className: imageCapable ? 'dsh-pf-badge dsh-pf-ok' : 'dsh-pf-badge dsh-pf-muted', title: imageCapable ? t('imageCapable') : t('textOnly') }, row.id)
+                }))) : null,
             h(Toast, { message: toast && toast.message, tone: toast && toast.tone })),
 
           h('div', { className: 'dsh-pf-card' },
