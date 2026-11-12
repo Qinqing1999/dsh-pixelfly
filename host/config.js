@@ -26,10 +26,6 @@ export function configPath() {
   return path.join(pluginRoot(), 'config.json')
 }
 
-export function statePath() {
-  return path.join(pluginRoot(), 'state.json')
-}
-
 export function workspaceRoot() {
   return path.join(pluginRoot(), 'history')
 }
@@ -214,7 +210,7 @@ export function publicConfig(config = readConfig()) {
     hasKey: typeof entry.key === 'string' && entry.key.length > 0,
     length: typeof entry.key === 'string' ? entry.key.length : 0,
   }))
-  out.paths = { root: pluginRoot(), config: configPath(), state: statePath(), history: workspaceRoot(), assets: path.join(pluginRoot(), 'assets') }
+  out.paths = { root: pluginRoot(), config: configPath(), history: workspaceRoot(), assets: path.join(pluginRoot(), 'assets') }
   out.env = {
     seedKeys: (process.env.PIXELFLY_API_KEYS || '').split(/[\s,]+/).filter(Boolean).length,
     baseUrlOverride: typeof process.env.PIXELFLY_BASE_URL === 'string' ? process.env.PIXELFLY_BASE_URL.trim() : '',
@@ -244,20 +240,6 @@ export function baseUrl(config = readConfig()) {
   const override = typeof process.env.PIXELFLY_BASE_URL === 'string' ? process.env.PIXELFLY_BASE_URL.trim() : ''
   const raw = override.length > 0 ? override : String(config.upstream?.baseUrl || DEFAULT_CONFIG.upstream.baseUrl)
   return raw.replace(/\/+$/, '')
-}
-
-export function writeState(state) {
-  try {
-    writeFileAtomic(statePath(), `${JSON.stringify(state, null, 2)}\n`, 0o600)
-  } catch { /* state is advisory; a read-only home must not break generation */ }
-}
-
-export function readState() {
-  try {
-    return JSON.parse(fs.readFileSync(statePath(), 'utf8'))
-  } catch {
-    return {}
-  }
 }
 
 export { ensureDir, writeFileAtomic }

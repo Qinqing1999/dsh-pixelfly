@@ -17,7 +17,6 @@ import {
   workspaceRoot,
   publicConfig,
   readConfig,
-  readState,
   sizesFor,
   writeConfig,
 } from './config.js'
@@ -264,7 +263,6 @@ function configRoute(auth) {
   return guarded(async (req, res) => {
     if (req.method === 'GET') {
       const config = readConfig()
-      const state = readState()
       sendJson(res, 200, {
         ok: true,
         config: publicConfig(config),
@@ -280,7 +278,6 @@ function configRoute(auth) {
           colour: COLOUR_MODE_LIST,
           fusion: FUSION_MODE_LIST,
         },
-        stats: state.lastRun ?? null,
       })
       return
     }
@@ -675,7 +672,6 @@ function statsRoute(auth) {
   return guarded(async (req, res) => {
     if (req.method !== 'GET') return sendJson(res, 405, { ok: false, error: 'GET only' })
     const config = readConfig()
-    const state = readState()
     const keys = activeKeys(config)
     const pool = new KeyPool(keys, {
       rotate: config.retry?.rotateKeys !== false,
@@ -688,7 +684,6 @@ function statsRoute(auth) {
       retry: config.retry,
       models: config.models,
       sizes: sizesFor(config),
-      lastRun: state.lastRun ?? null,
       versionCount: getWorkspace().versions.length,
       pool: pool.snapshot(),
     })

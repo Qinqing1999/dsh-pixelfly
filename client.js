@@ -1448,7 +1448,6 @@ window.__ModuleLoader__.load({
       const t = useT()
       const [config, setConfig] = useState(null)
       const [resolved, setResolved] = useState(null)
-      const [stats, setStats] = useState(null)
       const [busy, setBusy] = useState(false)
       const [busyId, setBusyId] = useState('')
       const [draft, setDraft] = useState(null)
@@ -1463,7 +1462,6 @@ window.__ModuleLoader__.load({
           const body = await api('config')
           setConfig(body.config)
           setResolved(body.resolved ?? null)
-          setStats(body.stats ?? null)
           setDraft(body.config)
         } catch (error) {
           showToast(error.message, true)
