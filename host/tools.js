@@ -6,6 +6,7 @@
 // build step.
 
 import { activeKeys, maskKey, pluginRoot, publicConfig, readConfig, sizesFor, writeConfig } from './config.js'
+import { PROVIDERS } from './providers.js'
 import { listModels } from './upstream.js'
 import { execute } from './session.js'
 import {
@@ -269,13 +270,14 @@ export function createTools(ctx) {
 
   const configTool = {
     name: 'pixelfly_config',
-    description: 'Read or update the Pixelfly configuration: upstream base URL and provider, API keys, default image and vision models, retry policy and size limits. Secrets are returned masked.',
+    description: 'Read or update the Pixelfly configuration: upstream base URL, provider and vision wire format, API keys, default image and vision models, retry policy and size limits. Secrets are returned masked.',
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['read', 'setBaseUrl', 'setProvider', 'setDefaultModel', 'setVisionModel', 'addKey', 'removeKey', 'setRetry'], description: 'What to do. Defaults to read.' },
+        action: { type: 'string', enum: ['read', 'setBaseUrl', 'setProvider', 'setVisionFormat', 'setDefaultModel', 'setVisionModel', 'addKey', 'removeKey', 'setRetry'], description: 'What to do. Defaults to read.' },
+        visionFormat: { type: 'string', enum: ['chat', 'anthropic', 'responses'], description: 'For setVisionFormat: how the vision model is called.' },
         baseUrl: { type: 'string', description: 'For setBaseUrl: the upstream base URL, e.g. https://token.sensenova.cn/v1' },
-        provider: { type: 'string', enum: ['sensenova', 'openai', 'gemini'], description: 'For setProvider: which request shape the upstream speaks.' },
+        provider: { type: 'string', enum: PROVIDERS, description: 'For setProvider: which request shape the upstream speaks.' },
         model: { type: 'string', description: 'For setDefaultModel or setVisionModel: the model id.' },
         key: { type: 'string', description: 'For addKey: the API key value.' },
         label: { type: 'string', description: 'For addKey: a human label for the key.' },
@@ -299,8 +301,13 @@ export function createTools(ctx) {
         writeConfig({ upstream: { baseUrl: args.baseUrl.trim() } })
         return { ok: true, message: `Upstream base URL set to ${args.baseUrl.trim()}` }
       }
+      if (action === 'setVisionFormat') {
+        if (!['chat', 'anthropic', 'responses'].includes(args?.visionFormat)) throw new Error('visionFormat must be chat, anthropic or responses')
+        writeConfig({ upstream: { visionFormat: args.visionFormat } })
+        return { ok: true, message: `Vision wire format set to ${args.visionFormat}` }
+      }
       if (action === 'setProvider') {
-        if (!['sensenova', 'openai', 'gemini'].includes(args?.provider)) throw new Error('provider must be sensenova, openai or gemini')
+        if (!PROVIDERS.includes(args?.provider)) throw new Error(`provider must be one of ${PROVIDERS.join(', ')}`)
         writeConfig({ upstream: { provider: args.provider } })
         return { ok: true, message: `Provider set to ${args.provider}` }
       }
@@ -339,7 +346,7 @@ export function createTools(ctx) {
       const config = publicConfig()
       const lines = [
         `Config directory: ${pluginRoot()}`,
-        `Upstream: ${config.upstream.baseUrl} (${config.upstream.provider})`,
+        `Upstream: ${config.upstream.baseUrl} (${config.upstream.provider}, vision over ${config.upstream.visionFormat ?? 'chat'})`,
         `Timeouts: ${config.upstream.timeoutMs} ms images, ${config.upstream.visionTimeoutMs} ms vision`,
         `Default image model: ${config.models.default}`,
         `Image models: ${config.models.items.map((item) => item.id).join(', ')}`,
@@ -384,7 +391,7 @@ export function createTools(ctx) {
       const keys = activeKeys(config).map((entry) => ({ id: entry.id, label: entry.label, masked: maskKey(entry.key), enabled: entry.enabled !== false }))
       const workspace = getWorkspace()
       const lines = [
-        `Upstream: ${config.upstream.baseUrl} (${config.upstream.provider})`,
+        `Upstream: ${config.upstream.baseUrl} (${config.upstream.provider}, vision over ${config.upstream.visionFormat ?? 'chat'})`,
         `Keys: ${keys.length} configured`,
         ...keys.map((key) => `  \u00b7 ${key.label} ${key.masked}${key.enabled === false ? ' (disabled)' : ''}`),
         `Retry: up to ${config.retry?.maxAttempts ?? '?'} attempts, base ${config.retry?.baseDelayMs ?? '?'} ms`,

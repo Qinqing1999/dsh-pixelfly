@@ -135,7 +135,6 @@ function emptyWorkspace() {
     cover: '',
     currentVersionId: '',
     versions: [],
-    conversation: [],
   }
 }
 
@@ -149,7 +148,9 @@ function readWorkspaceFile() {
   try {
     const parsed = JSON.parse(text)
     if (!Array.isArray(parsed.versions)) parsed.versions = []
-    if (!Array.isArray(parsed.conversation)) parsed.conversation = []
+    // Older files carried a chat log that nothing rendered; dropping it here means the
+    // next write shrinks the file instead of carrying the dead weight forward.
+    delete parsed.conversation
     return parsed
   } catch {
     return null
@@ -184,7 +185,6 @@ export function getWorkspace() {
 export function resetWorkspace() {
   const workspace = ensureWorkspace()
   workspace.versions = []
-  workspace.conversation = []
   workspace.currentVersionId = ''
   workspace.cover = ''
   return writeWorkspace(workspace)
@@ -286,36 +286,6 @@ export function patchVersion(versionId, patch = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// conversation
-// ---------------------------------------------------------------------------
-
-/** Append one line to the workspace's conversation log. */
-export function appendMessage(message = {}) {
-  const workspace = ensureWorkspace()
-  const row = {
-    id: newId('m'),
-    at: new Date().toISOString(),
-    role: message.role === 'user' ? 'user' : 'assistant',
-    kind: typeof message.kind === 'string' ? message.kind : 'text',
-    text: typeof message.text === 'string' ? message.text.slice(0, 8000) : '',
-    versionId: typeof message.versionId === 'string' ? message.versionId : '',
-    images: Array.isArray(message.images) ? message.images.filter((value) => typeof value === 'string').slice(0, 8) : [],
-    ok: message.ok !== false,
-  }
-  workspace.conversation.push(row)
-  if (workspace.conversation.length > 400) workspace.conversation = workspace.conversation.slice(-400)
-  writeWorkspace(workspace)
-  return row
-}
-
-export function clearConversation() {
-  const workspace = ensureWorkspace()
-  workspace.conversation = []
-  writeWorkspace(workspace)
-  return { ok: true }
-}
-
-// ---------------------------------------------------------------------------
 // prompt library
 // ---------------------------------------------------------------------------
 
@@ -354,11 +324,15 @@ export function addLibraryPrompt(input = {}) {
   const library = readLibrary()
   const text = typeof input.text === 'string' ? input.text.trim() : ''
   if (text.length === 0) throw new StoreError('A prompt needs text', 'empty')
+  // An entry may remember the picture it was distilled from, so the gallery can
+  // show what the prompt looks like instead of only what it says.
+  const imageId = typeof input.imageId === 'string' && input.imageId.length > 0 ? input.imageId : ''
   const row = {
     id: newId('pl'),
     title: typeof input.title === 'string' && input.title.trim().length > 0 ? input.title.trim().slice(0, 120) : text.slice(0, 60),
     text: text.slice(0, 12000),
     builtin: false,
+    imageId,
     createdAt: new Date().toISOString(),
   }
   library.prompts.unshift(row)

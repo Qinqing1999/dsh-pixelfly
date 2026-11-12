@@ -161,7 +161,6 @@ window.__ModuleLoader__.load({
         clearHistoryConfirm: '清空全部版本？图片文件会一起删除。',
         versions: '版本',
         version: '版本',
-        conversation: '对话',
         batch: '批量',
         prompt: '提示词',
         promptPlaceholder: '描述你想要的画面，或说明这次要怎么改…',
@@ -188,13 +187,17 @@ window.__ModuleLoader__.load({
         selection: '选区',
         clearSelection: '清除选区',
         apply: '应用',
+        upload: '导入图片',
+        uploadHint: '把已有的图片放进历史，之后的操作都从它开始',
         reference: '参考图',
         pickReference: '选择参考图',
         dropHint: '把参考图拖到画布上即可融合',
         ops: {
+          upload: '导入图片',
           text2image: '文生图',
           edit: '提示词改图',
           localEdit: '局部重绘',
+          localEditBatch: '局部重绘批量',
           fusion: '参考图融合',
           batchVariables: '变量批量',
           batchList: '提示词批量',
@@ -206,6 +209,7 @@ window.__ModuleLoader__.load({
           extractAsset: '素材提取',
           editText: '图片改字',
           colorize: '上色与线稿',
+          distill: '提示词反推',
         },
         groups: { create: '创作', edit: '编辑', remove: '去除', extract: '提取', style: '风格' },
         preset: '预设',
@@ -238,6 +242,7 @@ window.__ModuleLoader__.load({
         unifiedStyle: '统一风格',
         preview: '预览数量',
         regions: '文字区域',
+        cached: '已缓存',
         recognise: '识别图中文字',
         replaceWith: '替换为',
         clearText: '清除',
@@ -258,6 +263,10 @@ window.__ModuleLoader__.load({
         upstream: '上游服务',
         baseUrl: '接口地址',
         provider: '协议',
+        visionFormat: '视觉协议',
+        vf_chat: 'Chat Completions',
+        vf_anthropic: 'Messages',
+        vf_responses: 'Responses',
         timeout: '请求超时（毫秒）',
         visionTimeout: '视觉请求超时（毫秒）',
         discover: '读取上游模型',
@@ -293,6 +302,7 @@ window.__ModuleLoader__.load({
         statusTitle: '状态',
         save: '保存',
         saved: '已保存',
+        uploaded: '已加入历史',
         testOk: '可用',
         testFail: '不可用',
       },
@@ -310,7 +320,6 @@ window.__ModuleLoader__.load({
         clearHistoryConfirm: 'Clear every version? The image files are deleted too.',
         versions: 'Versions',
         version: 'Version',
-        conversation: 'Chat',
         batch: 'Batch',
         prompt: 'Prompt',
         promptPlaceholder: 'Describe the picture you want, or what to change…',
@@ -337,13 +346,17 @@ window.__ModuleLoader__.load({
         selection: 'Selection',
         clearSelection: 'Clear selection',
         apply: 'Apply',
+        upload: 'Upload a picture',
+        uploadHint: 'Start the history from a picture you already have',
         reference: 'Reference',
         pickReference: 'Pick reference',
         dropHint: 'Drop a reference image on the canvas to fuse',
         ops: {
+          upload: 'Upload',
           text2image: 'Text to image',
           edit: 'Prompt edit',
           localEdit: 'Regional repaint',
+          localEditBatch: 'Regional repaint batch',
           fusion: 'Reference fusion',
           batchVariables: 'Variable batch',
           batchList: 'Prompt list batch',
@@ -355,6 +368,7 @@ window.__ModuleLoader__.load({
           extractAsset: 'Extract asset',
           editText: 'Edit text',
           colorize: 'Colour and line art',
+          distill: 'Read the prompt back',
         },
         groups: { create: 'Create', edit: 'Edit', remove: 'Remove', extract: 'Extract', style: 'Style' },
         preset: 'Preset',
@@ -387,6 +401,7 @@ window.__ModuleLoader__.load({
         unifiedStyle: 'Unified style',
         preview: 'Preview count',
         regions: 'Text regions',
+        cached: 'cached',
         recognise: 'Read text in image',
         replaceWith: 'Replace with',
         clearText: 'Clear',
@@ -407,6 +422,10 @@ window.__ModuleLoader__.load({
         upstream: 'Upstream',
         baseUrl: 'Base URL',
         provider: 'Protocol',
+        visionFormat: 'Vision protocol',
+        vf_chat: 'Chat Completions',
+        vf_anthropic: 'Messages',
+        vf_responses: 'Responses',
         timeout: 'Request timeout (ms)',
         visionTimeout: 'Vision timeout (ms)',
         discover: 'Read upstream models',
@@ -442,6 +461,7 @@ window.__ModuleLoader__.load({
         statusTitle: 'Status',
         save: 'Save',
         saved: 'Saved',
+        uploaded: 'Added to the history',
         testOk: 'OK',
         testFail: 'Failed',
       },
@@ -509,6 +529,10 @@ window.__ModuleLoader__.load({
       '.dsh-pf-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-top:12px}',
       '.dsh-pf-tile{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:10px;overflow:hidden;cursor:pointer;display:flex;flex-direction:column;text-align:left}',
       '.dsh-pf-tile:hover{border-color:var(--dsw-alias-brand-primary)}',
+      '.dsh-pf-candidates{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}',
+      '.dsh-pf-candidate{width:52px;height:52px;padding:0;border-radius:8px;overflow:hidden;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2);cursor:pointer}',
+      '.dsh-pf-candidate img{width:100%;height:100%;object-fit:cover;display:block}',
+      '.dsh-pf-candidate.on{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
       '.dsh-pf-thumb{aspect-ratio:1/1;background:var(--dsw-alias-bg-layer-2);display:flex;align-items:center;justify-content:center;overflow:hidden}',
       '.dsh-pf-thumb img{width:100%;height:100%;object-fit:cover;display:block}',
       '.dsh-pf-tile-meta{padding:8px 10px;display:flex;flex-direction:column;gap:3px;min-width:0}',
@@ -528,13 +552,12 @@ window.__ModuleLoader__.load({
       '.dsh-pf-tabs{display:flex;gap:4px;padding:8px 10px 0;flex:none}',
       '.dsh-pf-tab{padding:6px 12px;border-radius:8px 8px 0 0;font-size:12px;cursor:pointer;color:var(--dsw-alias-label-secondary);border:1px solid transparent;border-bottom:none}',
       '.dsh-pf-tab.on{background:var(--dsw-alias-bg-layer-1);border-color:var(--dsw-alias-border-l1);color:var(--dsw-alias-label-primary);font-weight:600}',
-      '.dsh-pf-log{flex:1;min-height:0;overflow:auto;padding:10px 12px;display:flex;flex-direction:column;gap:10px}',
-      '.dsh-pf-msg{display:flex;flex-direction:column;gap:4px;font-size:12px;line-height:1.5}',
-      '.dsh-pf-msg.user{align-items:flex-end}',
-      '.dsh-pf-bubble{padding:7px 10px;border-radius:10px;background:var(--dsw-alias-bg-layer-2);max-width:100%;word-break:break-word}',
-      '.dsh-pf-msg.user .dsh-pf-bubble{background:var(--dsw-alias-brand-primary);color:#fff}',
       '.dsh-pf-note{font-size:11px;color:var(--dsw-alias-label-secondary)}',
-      '.dsh-pf-tree{display:flex;flex-direction:column;gap:2px;max-height:220px;overflow:auto}',
+      '.dsh-pf-treewrap{display:flex;flex-direction:column;min-height:0}',
+      '.dsh-pf-tree{display:flex;flex-direction:column;gap:2px;max-height:220px;overflow:auto;cursor:grab;user-select:none}',
+      '.dsh-pf-tree:active{cursor:grabbing}',
+      '.dsh-pf-branch{color:var(--dsw-alias-text-l3);flex:none;font-size:11px}',
+      '.dsh-pf-libthumb{width:22px;height:22px;border-radius:5px;object-fit:cover;flex:none;background:var(--dsw-alias-bg-layer-1)}',
       '.dsh-pf-node{display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:7px;cursor:pointer;font-size:12px;min-width:0}',
       '.dsh-pf-node:hover{background:var(--dsw-alias-bg-layer-2)}',
       '.dsh-pf-node.on{background:var(--dsw-alias-bg-layer-2);box-shadow:inset 2px 0 0 var(--dsw-alias-brand-primary)}',
@@ -1031,6 +1054,116 @@ window.__ModuleLoader__.load({
       { op: 'fusion', icon: 'image' },
     ]
 
+    /**
+     * The history as a tree.
+     *
+     * Each version knows its parent, so the shape is already there: this only
+     * orders the rows depth-first so a branch stays together, indents by depth,
+     * and lets the whole thing be zoomed and dragged. A flat list loses exactly
+     * the thing a branching history is for — which run came from which.
+     */
+    function VersionTree({ versions, current, onSelect }) {
+      const t = useT()
+      const opLabel = useOpLabel()
+      const [zoom, setZoom] = useState(1)
+      const [pan, setPan] = useState({ x: 0, y: 0 })
+      const drag = useRef(null)
+
+      const rows = useMemo(() => {
+        const byId = new Map(versions.map((row) => [row.id, row]))
+        const children = new Map()
+        const roots = []
+        for (const row of versions) {
+          if (row.parentId && byId.has(row.parentId)) {
+            const list = children.get(row.parentId) ?? []
+            list.push(row)
+            children.set(row.parentId, list)
+          } else {
+            roots.push(row)
+          }
+        }
+        const out = []
+        const walk = (row, depth) => {
+          out.push({ row, depth })
+          for (const child of children.get(row.id) ?? []) walk(child, depth + 1)
+        }
+        for (const root of roots) walk(root, 0)
+        return out
+      }, [versions])
+
+      if (rows.length === 0) return h('div', { className: 'dsh-pf-empty' }, t('noVersions'))
+
+      const startDrag = (event) => {
+        if (event.button !== 0) return
+        drag.current = { x: event.clientX - pan.x, y: event.clientY - pan.y }
+      }
+      const moveDrag = (event) => {
+        if (!drag.current) return
+        setPan({ x: event.clientX - drag.current.x, y: event.clientY - drag.current.y })
+      }
+      const endDrag = () => { drag.current = null }
+
+      return h('div', { className: 'dsh-pf-treewrap' },
+        h('div', { className: 'dsh-pf-row', style: { marginBottom: 4 } },
+          h('button', { className: 'dsh-pf-ghost', onClick: () => setZoom((z) => Math.max(0.6, +(z - 0.1).toFixed(2))) }, '−'),
+          h('button', { className: 'dsh-pf-ghost', onClick: () => setZoom((z) => Math.min(1.6, +(z + 0.1).toFixed(2))) }, '+'),
+          h('button', { className: 'dsh-pf-ghost', onClick: () => { setZoom(1); setPan({ x: 0, y: 0 }) } }, t('fit')),
+          h('span', { className: 'dsh-pf-grow' }),
+          h('span', { className: 'dsh-pf-note' }, `${rows.length}`),
+        ),
+        h('div', {
+          className: 'dsh-pf-tree',
+          onMouseDown: startDrag,
+          onMouseMove: moveDrag,
+          onMouseUp: endDrag,
+          onMouseLeave: endDrag,
+        },
+          h('div', { style: { transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})`, transformOrigin: '0 0', width: 'max-content', minWidth: '100%' } },
+            rows.map(({ row, depth }) =>
+              h('div', {
+                key: row.id,
+                className: `dsh-pf-node${row.id === current ? ' on' : ''}`,
+                style: { paddingLeft: 8 + depth * 14 },
+                onClick: () => onSelect(row.id),
+                title: row.prompt || row.label,
+              },
+                depth > 0 ? h('span', { className: 'dsh-pf-branch' }, '└') : null,
+                h('span', { className: 'dsh-pf-node-label' }, `${opLabel(row.op)} · ${row.prompt ? row.prompt.slice(0, 24) : row.label ?? ''}`),
+                row.images?.length > 1 ? h('span', { className: 'dsh-pf-chip' }, `${row.images.length}`) : null,
+              ),
+            ),
+          ),
+        ),
+      )
+    }
+
+    /** The picture a saved prompt was distilled from, when it has one. */
+    function LibraryThumb({ id }) {
+      const src = useAssetUrl(id)
+      return src ? h('img', { src, alt: '', className: 'dsh-pf-libthumb' }) : null
+    }
+
+    // A row of the candidates a single run produced. Picking one changes what the
+    // canvas shows and what the next operation starts from, without touching the
+    // history: the version already holds every candidate.
+    function Candidates({ images, picked, onPick }) {
+      if (!Array.isArray(images) || images.length < 2) return null
+      return h('div', { className: 'dsh-pf-candidates' },
+        images.map((id, index) =>
+          h(CandidateThumb, { key: id, id, index, on: id === picked, onPick }),
+        ),
+      )
+    }
+
+    function CandidateThumb({ id, index, on, onPick }) {
+      const src = useAssetUrl(id)
+      return h('button', {
+        className: `dsh-pf-candidate${on ? ' on' : ''}`,
+        onClick: () => onPick(id),
+        title: `${index + 1}`,
+      }, src ? h('img', { src, alt: `${index + 1}` }) : null)
+    }
+
     function Workspace() {
       const t = useT()
       const opLabel = useOpLabel()
@@ -1045,13 +1178,23 @@ window.__ModuleLoader__.load({
       const [comparing, setComparing] = useState(false)
       const [toast, showToast, clearToast] = useToast()
       const [selectedId, setSelectedId] = useState('')
+      // Which of a version's candidates is on the canvas. A run can answer with up
+      // to four pictures; the tree shows the version, this picks the one to look
+      // at and to continue from.
+      const [pickedImage, setPickedImage] = useState('')
       const [reference, setReference] = useState(null)
       const [sizes, setSizes] = useState([])
+      const [catalog, setCatalog] = useState([])
       const [models, setModels] = useState({ image: [], vision: [] })
       const [library, setLibrary] = useState([])
       const [keyCount, setKeyCount] = useState(null)
       const abortRef = useRef(null)
       const refInput = useRef(null)
+      const uploadInput = useRef(null)
+      // Text recognition costs a vision round trip, so the answer is kept per
+      // picture and per vision model: changing the model can change the regions,
+      // and continuing from a different candidate must not reuse them.
+      const regionsCache = useRef(new Map())
       const model = useRef({ image: '', vision: '' })
 
       const rect = form.rect ?? null
@@ -1080,6 +1223,7 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         load()
         api('models').then((body) => setSizes(body.sizes ?? [])).catch(() => {})
+        api('operations').then((body) => setCatalog(Array.isArray(body.operations) ? body.operations : [])).catch(() => {})
         // The pickers follow the configured lists, not the discovered ones: an
         // upstream catalogue can omit models that still answer requests.
         api('config').then((body) => {
@@ -1095,13 +1239,38 @@ window.__ModuleLoader__.load({
         api('config').then((body) => setKeyCount(body.resolved?.keyCount ?? null)).catch(() => {})
       }, [load])
 
+      // Only offer what can run right now: an operation that edits a picture needs
+      // one to edit, and one that plans with a vision model needs a vision model.
+      const usableOps = useMemo(() => {
+        const rows = catalog.length > 0 ? catalog : []
+        if (rows.length === 0) return []
+        const hasSource = (workspace?.versions ?? []).length > 0
+        const hasVision = (models.vision ?? []).length > 0
+        return rows
+          .filter((row) => (row.needsSource ? hasSource : true))
+          .filter((row) => (row.needsVision ? hasVision : true))
+          .map((row) => row.id)
+      }, [catalog, workspace, models])
+
       const versions = workspace?.versions ?? []
       const version = useMemo(() => {
         if (versions.length === 0) return null
         return versions.find((row) => row.id === selectedId) ?? versions.at(-1) ?? null
       }, [versions, selectedId])
 
-      const currentImageId = version?.images?.[0] ?? ''
+      // An operation such as prompt distillation records a version that has no
+      // picture of its own. The canvas keeps showing the nearest ancestor that
+      // has one, so reading a prompt back never blanks the studio.
+      const currentImageId = useMemo(() => {
+        const byId = new Map(versions.map((row) => [row.id, row]))
+        let cursor = version
+        for (let step = 0; cursor && step < 200; step += 1) {
+          const images = cursor.images ?? []
+          if (images.length > 0) return images.includes(pickedImage) ? pickedImage : images[0]
+          cursor = cursor.parentId ? byId.get(cursor.parentId) ?? null : null
+        }
+        return ''
+      }, [version, versions, pickedImage])
       const currentSrc = useAssetUrl(currentImageId)
       const parentVersion = useMemo(() => {
         if (!version?.parentId) return null
@@ -1163,11 +1332,22 @@ window.__ModuleLoader__.load({
       }
 
       const recognise = async () => {
+        const key = `${version?.id ?? ''}|${currentImageId}|${model.current.vision || ''}`
+        const cached = regionsCache.current.get(key)
+        if (cached) {
+          setForm((previous) => ({ ...previous, regions: cached.map((row) => ({ ...row, next: '', drop: false })) }))
+          showToast(`${t('regions')}: ${cached.length} (${t('cached')})`)
+          return
+        }
         setBusy(true)
         try {
-          const body = await api('recognise', { body: { versionId: version?.id ?? '', visionModel: model.current.vision || undefined } })
-          setForm((previous) => ({ ...previous, regions: (body.regions ?? []).map((row) => ({ ...row, next: '', drop: false })) }))
-          showToast(`${t('regions')}: ${(body.regions ?? []).length}`)
+          const body = await api('recognise', {
+            body: { versionId: version?.id ?? '', imageId: currentImageId, visionModel: model.current.vision || undefined },
+          })
+          const regions = body.regions ?? []
+          regionsCache.current.set(key, regions)
+          setForm((previous) => ({ ...previous, regions: regions.map((row) => ({ ...row, next: '', drop: false })) }))
+          showToast(`${t('regions')}: ${regions.length}`)
         } catch (error) {
           showToast(`${error.code ? `[${error.code}] ` : ''}${error.message}`, true)
           setForm((previous) => ({ ...previous, regions: [] }))
@@ -1212,11 +1392,30 @@ window.__ModuleLoader__.load({
         link.click()
       }
 
+      // A picture that already exists becomes a root version, so every operation
+      // that needs a source can start from it.
+      const uploadPicture = async (file) => {
+        if (!file || busy) return
+        setBusy(true)
+        try {
+          const payload = await readFile(file)
+          const body = await api('upload', { body: { image: payload.dataUrl, label: payload.name } })
+          if (body.workspace) setWorkspace(body.workspace)
+          if (body.version?.id) { setSelectedId(body.version.id); setPickedImage('') }
+          setRun(body)
+          showToast(t('uploaded'))
+        } catch (error) {
+          showToast(`${error.code ? `[${error.code}] ` : ''}${error.message}`, true)
+        } finally {
+          setBusy(false)
+        }
+      }
+
       const saveToLibrary = async () => {
         const text = (form.prompt ?? '').trim()
         if (!text) return
         try {
-          await api('library', { body: { action: 'add', text } })
+          await api('library', { body: { action: 'add', text, imageId: currentImageId || undefined } })
           const refreshed = await api('library')
           setLibrary(refreshed.prompts ?? [])
           showToast(t('saved'))
@@ -1260,6 +1459,9 @@ window.__ModuleLoader__.load({
               h('span', { style: { width: 1, height: 18, background: 'var(--dsw-alias-border-l1)' } }),
               h('button', { className: 'dsh-pf-ghost', disabled: !parentVersion, onClick: () => setComparing(true) }, h(Icon, { name: 'compare', size: 14 }), ' ', t('compare')),
               h('button', { className: 'dsh-pf-ghost', disabled: !currentSrc, onClick: downloadCurrent }, h(Icon, { name: 'download', size: 14 }), ' ', t('download')),
+              h('button', { className: 'dsh-pf-ghost', title: t('uploadHint'), disabled: busy, onClick: () => uploadInput.current?.click() }, h(Icon, { name: 'image', size: 14 }), ' ', t('upload')),
+              h('input', { ref: uploadInput, type: 'file', accept: 'image/*', style: { display: 'none' },
+                onChange: async (event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) await uploadPicture(file) } }),
               h('span', { className: 'dsh-pf-grow' }),
               version ? h('span', { className: 'dsh-pf-chip' }, `${opLabel(version.op)} · ${version.createdAt ? new Date(version.createdAt).toLocaleTimeString() : ''}`) : null,
               keyCount === null ? null : h('span', { className: 'dsh-pf-chip brand' }, `${t('keyCount')}: ${keyCount}`),
@@ -1300,6 +1502,7 @@ window.__ModuleLoader__.load({
                 h('button', { onClick: () => abortRef.current?.abort() }, t('cancelRun')),
               ) : null,
             ),
+            h(Candidates, { images: version?.images ?? [], picked: currentImageId, onPick: setPickedImage }),
             run
               ? h('div', { className: 'dsh-pf-row', style: { marginTop: 10, alignItems: 'center' } },
                   h('span', { className: 'dsh-pf-chip ok' }, `${t('result')}: ${run.images?.length ?? 0}`),
@@ -1325,20 +1528,13 @@ window.__ModuleLoader__.load({
               'div',
               { className: 'dsh-pf-side-pad', style: { flex: 1, minHeight: 0, overflow: 'auto' } },
               tab === 'versions'
-                ? h('div', { className: 'dsh-pf-tree' },
-                    [...versions].reverse().map((row) =>
-                      h('div', { key: row.id, className: `dsh-pf-node${row.id === version?.id ? ' on' : ''}`, onClick: () => setSelectedId(row.id) },
-                        h('span', { className: 'dsh-pf-node-label', title: row.prompt || row.label }, `${opLabel(row.op)} · ${row.prompt ? row.prompt.slice(0, 26) : row.label ?? ''}`),
-                        h('span', { className: 'dsh-pf-note' }, row.images?.length ? `${row.images.length}` : ''),
-                      ),
-                    ),
-                  )
+                ? h(VersionTree, { versions, current: version?.id ?? '', onSelect: (id) => { setSelectedId(id); setPickedImage('') } })
                 : null,
               tab === 'chat'
                 ? h('div', { className: 'dsh-pf-col', style: { gap: 10 } },
                     h('div', { className: 'dsh-pf-row' },
                       h('select', { value: op, onChange: (event) => { setOp(event.target.value); setRect(null); setRects([]) }, style: { maxWidth: 150 } },
-                        ['text2image', 'edit', 'localEdit', 'fusion', 'batchVariables', 'batchList', 'outpaint', 'enhance', 'removeWatermark', 'removeBackground', 'removeElement', 'extractAsset', 'editText', 'colorize']
+                        (usableOps.includes(op) ? usableOps : [op].concat(usableOps))
                           .map((id) => h('option', { key: id, value: id }, opLabel(id))),
                       ),
                       h('span', { className: 'dsh-pf-grow' }),
@@ -1379,6 +1575,7 @@ window.__ModuleLoader__.load({
                           h('div', { className: 'dsh-pf-list' },
                             library.slice(0, 12).map((entry) =>
                               h('div', { key: entry.id, className: 'dsh-pf-list-item' },
+                                entry.imageId ? h(LibraryThumb, { id: entry.imageId }) : null,
                                 h('span', { style: { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, title: entry.text }, entry.text),
                                 h('button', { className: 'dsh-pf-ghost', onClick: () => setForm((previous) => ({ ...previous, prompt: entry.text })) }, t('usePrompt')),
                               ),
@@ -1558,7 +1755,13 @@ window.__ModuleLoader__.load({
             ),
             h(Field, { label: t('provider'), grow: 1 },
               h('select', { value: draft.upstream?.provider ?? 'sensenova', onChange: (event) => patch(['upstream', 'provider'], event.target.value) },
-                ['sensenova', 'openai', 'gemini'].map((id) => h('option', { key: id, value: id }, id)),
+                ['sensenova', 'openai', 'gemini', 'grok'].map((id) => h('option', { key: id, value: id }, id)),
+              ),
+            ),
+            h(Field, { label: t('visionFormat'), grow: 1 },
+              h('select', { value: draft.upstream?.visionFormat ?? 'chat', onChange: (event) => patch(['upstream', 'visionFormat'], event.target.value) },
+                [['chat', t('vf_chat')], ['anthropic', t('vf_anthropic')], ['responses', t('vf_responses')]]
+                  .map(([id, label]) => h('option', { key: id, value: id }, label)),
               ),
             ),
           ),

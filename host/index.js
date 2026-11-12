@@ -21,8 +21,9 @@ import {
   writeConfig,
 } from './config.js'
 import { createTools } from './tools.js'
+import { PROVIDERS } from './providers.js'
 import { KeyPool, listModels, UpstreamError } from './upstream.js'
-import { decodeUpload, execute, publicWorkspace } from './session.js'
+import { adoptPicture, decodeUpload, execute, publicWorkspace } from './session.js'
 import {
   ASSET_KIND_LIST,
   COLOUR_MODE_LIST,
@@ -35,8 +36,6 @@ import {
 } from './operations.js'
 import {
   addLibraryPrompt,
-  appendMessage,
-  clearConversation,
   collectGarbage,
   deleteVersion,
   getVersion,
@@ -292,8 +291,11 @@ function configRoute(auth) {
         }
         upstream.baseUrl = body.upstream.baseUrl.trim()
       }
-      if (typeof body.upstream.provider === 'string' && ['sensenova', 'openai', 'gemini'].includes(body.upstream.provider)) {
+      if (typeof body.upstream.provider === 'string' && PROVIDERS.includes(body.upstream.provider)) {
         upstream.provider = body.upstream.provider
+      }
+      if (typeof body.upstream.visionFormat === 'string' && ['chat', 'anthropic', 'responses'].includes(body.upstream.visionFormat)) {
+        upstream.visionFormat = body.upstream.visionFormat
       }
       if (Number.isFinite(Number(body.upstream.timeoutMs))) {
         upstream.timeoutMs = Math.max(5000, Math.min(600000, Math.round(Number(body.upstream.timeoutMs))))
@@ -532,16 +534,6 @@ function workspaceRoute(auth) {
       sendJson(res, 200, { ok: true, workspace: publicWorkspace(getWorkspace()) })
       return
     }
-    if (action === 'clearConversation') {
-      clearConversation()
-      sendJson(res, 200, { ok: true, workspace: publicWorkspace(getWorkspace()) })
-      return
-    }
-    if (action === 'message') {
-      appendMessage({ role: 'user', kind: 'note', text: String(body.text ?? '') })
-      sendJson(res, 200, { ok: true, workspace: publicWorkspace(getWorkspace()) })
-      return
-    }
     if (action === 'reset') {
       resetWorkspace()
       sendJson(res, 200, { ok: true, workspace: publicWorkspace(getWorkspace()) })
@@ -620,7 +612,10 @@ function recogniseRoute(auth) {
     let source = typeof body.image === 'string' && body.image.length > 0 ? decodeUpload(body.image, config) : null
     if (source === null) {
       const version = getVersion(body.versionId ?? workspace.currentVersionId)
-      const assetId = version.images?.[0]
+      // A version can hold several candidates; the caller names the one it is
+      // looking at, so recognition happens on that picture and not on the first.
+      const wanted = typeof body.imageId === 'string' ? body.imageId : ''
+      const assetId = version.images?.includes(wanted) ? wanted : version.images?.[0]
       if (assetId) source = { buffer: readAsset(assetId), mediaType: 'image/png' }
     }
     if (source === null) return sendJson(res, 400, { ok: false, error: 'there is no picture to read yet' })
@@ -657,7 +652,7 @@ function libraryRoute(auth) {
     const body = await readJsonBody(req)
     const action = body.action ?? 'add'
     if (action === 'add') {
-      sendJson(res, 200, { ok: true, prompt: addLibraryPrompt({ title: body.title, text: body.text }) })
+      sendJson(res, 200, { ok: true, prompt: addLibraryPrompt({ title: body.title, text: body.text, imageId: body.imageId }) })
       return
     }
     if (action === 'remove') {
@@ -665,6 +660,24 @@ function libraryRoute(auth) {
       return
     }
     sendJson(res, 400, { ok: false, error: `unknown action ${action}` })
+  }, auth)
+}
+
+/**
+ * Take an uploaded picture into the history.
+ *
+ * The studio uses this to start from a picture that already exists instead of
+ * only from something the upstream drew.
+ */
+function uploadRoute(auth) {
+  return guarded(async (req, res) => {
+    if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'POST only' })
+    const body = await readJsonBody(req, 64 * 1024 * 1024)
+    const result = await adoptPicture(
+      { image: body.image, label: body.label },
+      { config: readConfig() },
+    )
+    sendJson(res, 200, result)
   }, auth)
 }
 
@@ -710,6 +723,7 @@ export function apply(ctx, config) {
     [`${ROUTE_BASE}/preview`, previewRoute(auth)],
     [`${ROUTE_BASE}/recognise`, recogniseRoute(auth)],
     [`${ROUTE_BASE}/asset`, assetRoute(auth)],
+    [`${ROUTE_BASE}/upload`, uploadRoute(auth)],
     [`${ROUTE_BASE}/library`, libraryRoute(auth)],
     [`${ROUTE_BASE}/stats`, statsRoute(auth)],
   ]

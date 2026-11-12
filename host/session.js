@@ -1,14 +1,14 @@
 // dsh-pixelfly — running an operation against the workspace.
 //
 // `runOperation` knows how to change a picture; this knows what that means for the
-// history. It resolves the source version, stores the results, appends the version
-// to the tree and writes the conversation lines. Both the HTTP route and the tool
-// go through here so they cannot drift apart.
+// history. It resolves the source version, stores the results and appends the
+// version to the tree. Both the HTTP route and the tool go through here so they
+// cannot drift apart.
 
 import { readConfig, sizesFor } from './config.js'
 import { KeyPool } from './upstream.js'
 import { runOperation } from './operations.js'
-import { readAsset, saveAsset, addVersion, appendMessage, getWorkspace, getVersion, updateWorkspace } from './store.js'
+import { readAsset, saveAsset, addVersion, getWorkspace, getVersion, updateWorkspace } from './store.js'
 import { probe } from './raster.js'
 
 /**
@@ -20,9 +20,16 @@ import { probe } from './raster.js'
 function resolveSource(workspace, versionId) {
   if (typeof versionId === 'string' && versionId.length > 0) {
     const version = getVersion(versionId)
-    const assetId = version.images?.[0]
-    if (!assetId) return { version, source: null }
-    return { version, source: { buffer: readAsset(assetId), mediaType: 'image/png' }, assetId }
+    // A version can hold no picture of its own — reading a prompt back records
+    // one. The picture to work from is then the nearest ancestor that has one.
+    const byId = new Map(workspace.versions.map((row) => [row.id, row]))
+    let cursor = version
+    for (let step = 0; cursor && step < 200; step += 1) {
+      const assetId = cursor.images?.[0]
+      if (assetId) return { version, source: { buffer: readAsset(assetId), mediaType: 'image/png' }, assetId }
+      cursor = cursor.parentId ? byId.get(cursor.parentId) ?? null : null
+    }
+    return { version, source: null }
   }
   const current = workspace.versions.find((row) => row.id === workspace.currentVersionId)
   if (current && current.images?.length > 0) {
@@ -129,15 +136,6 @@ export async function execute(operation, input, options = {}) {
     updateWorkspace({ stylePrompt: current.stylePrompt || result.prompt })
   }
 
-  appendMessage({
-    role: 'assistant',
-    kind: operation,
-    text: result.label ?? operation,
-    versionId: version.id,
-    images: stored.map((asset) => asset.id),
-    ok: true,
-  })
-
   // The caller gets the whole workspace back, so a client can replace its state in
   // one step instead of merging a partial payload into an older copy.
   const fresh = getWorkspace()
@@ -154,6 +152,47 @@ export async function execute(operation, input, options = {}) {
   }
 }
 
+/**
+ * Take an uploaded picture into the history as a starting version.
+ *
+ * Uploading is not an edit, so it does not branch: the picture becomes a root
+ * version and the operations that need a source can start from it. Nothing is
+ * sent upstream, which is why this is separate from `execute`.
+ */
+export async function adoptPicture(input = {}, options = {}) {
+  const config = options.config ?? readConfig()
+  const decoded = decodeUpload(input.image, config)
+  if (!decoded) throw new Error('That upload was not a readable picture')
+  let info
+  try {
+    info = await probe(decoded.buffer)
+  } catch {
+    // `probe` fails on bytes that are not an image at all; report that as the
+    // caller's mistake rather than as an internal decoding error.
+    throw new Error('That file is not a picture PixelFly can read')
+  }
+  const asset = saveAsset(decoded.buffer, { mediaType: 'image/png', width: info.width, height: info.height })
+  const label = typeof input.label === 'string' && input.label.trim().length > 0
+    ? input.label.trim().slice(0, 160)
+    : 'Uploaded picture'
+  const { version } = addVersion({
+    parentId: '',
+    op: 'upload',
+    label,
+    prompt: '',
+    images: [asset.id],
+    meta: { width: asset.width, height: asset.height, bytes: asset.bytes },
+  })
+  return {
+    ok: true,
+    op: 'upload',
+    label,
+    images: [{ id: asset.id, width: asset.width, height: asset.height, bytes: asset.bytes }],
+    version: { id: version.id, parentId: '', createdAt: version.createdAt, op: version.op, label: version.label },
+    workspace: publicWorkspace(getWorkspace()),
+  }
+}
+
 /** Strip nothing today, but keep one place that decides what a client may see. */
 export function publicWorkspace(workspace) {
   return {
@@ -163,7 +202,6 @@ export function publicWorkspace(workspace) {
     cover: workspace.cover ?? '',
     currentVersionId: workspace.currentVersionId ?? '',
     versions: workspace.versions ?? [],
-    conversation: workspace.conversation ?? [],
   }
 }
 

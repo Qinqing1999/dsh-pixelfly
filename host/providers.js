@@ -13,11 +13,18 @@ import { baseUrl } from './config.js'
 import { UpstreamError, callUpstream, postJson } from './upstream.js'
 import { assertStill } from './raster.js'
 
+// Per-provider wire behaviour. `onePerRequest` means one picture per call, so a
+// request for four has to be split; `editSize` is what an edit call should ask
+// for when the provider picks its own canvas.
 const DEFAULTS = {
   sensenova: { supportsEdit: true, onePerRequest: true, editSize: 'auto' },
   openai: { supportsEdit: true, onePerRequest: false, editSize: null },
   gemini: { supportsEdit: true, onePerRequest: true, editSize: null },
+  grok: { supportsEdit: true, onePerRequest: true, editSize: null },
 }
+
+/** The provider names the settings page offers. */
+export const PROVIDERS = ['sensenova', 'openai', 'gemini', 'grok']
 
 export function providerProfile(config) {
   const name = config.upstream?.provider ?? 'sensenova'
@@ -64,6 +71,12 @@ function buildBody({ provider, model, prompt, size, n, images, config }) {
   if (size) base.size = images.length > 0 && provider.editSize ? provider.editSize : size
   if (provider.name === 'gemini') {
     base.response_format = { type: 'image', mime_type: 'image/png', aspect_ratio: aspectOf(size) }
+    if (images.length > 0) base.images = images.map((image) => ({ image_url: dataUrl(image) }))
+    return base
+  }
+  if (provider.name === 'grok') {
+    // Grok takes the OpenAI image shape but no prompt rewriting knobs.
+    base.response_format = request.responseFormat ?? 'b64_json'
     if (images.length > 0) base.images = images.map((image) => ({ image_url: dataUrl(image) }))
     return base
   }

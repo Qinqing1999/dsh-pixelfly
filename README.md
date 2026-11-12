@@ -24,7 +24,13 @@ One workspace, one history. There is no library of projects to manage: every run
 whose parent is the picture you were working on, so the tree shows how a picture evolved and any
 node can be reopened or compared with another.
 
-The toolbar has ten operations:
+You do not have to start from a blank canvas: **Upload a picture** puts an existing file into the
+history as a root version, and every operation can continue from it. When a run returns several
+candidates they stay together in one version, with thumbnails under the canvas to choose which one
+is shown and which one the next edit starts from.
+
+The operation list is built from the catalogue, so an operation whose source picture or vision model
+is missing is not offered at all. In full:
 
 | Operation | What it needs | What it does |
 | --- | --- | --- |
@@ -41,6 +47,8 @@ The toolbar has ten operations:
 | **Colour and line art** | mode | Recolours a picture, or turns it into line art and back. |
 | **Reference fusion** | reference + prompt | Puts a subject from a reference picture into this one, or dresses, poses or groups it. |
 | **Batch** | prompt list or variables | Runs many prompts, or every combination of `[variable]` values, as separate versions. |
+| **Prompt distillation** | picture | Reads a picture back into the prompt that would produce it, and stores that as a step. |
+| **Upload a picture** | file | Starts the history from an existing picture instead of a generated one. |
 
 Selecting a region is a drag on the picture; the selection stays as percentages so it still means the
 same thing whatever size the model answers with.
@@ -71,6 +79,11 @@ Two roles, both configurable:
   `sensenova-u1.5-fast` and `sensenova-u1.5-lite`; any OpenAI-compatible image endpoint works.
 - **Vision model** — the one that looks. Used to plan a repaint, find a watermark, name the subject
   for background removal, and read text in a picture. Defaults to the SenseNova chat models.
+
+The upstream protocol is picked in the settings page — SenseNova, OpenAI-compatible, Gemini or Grok —
+and the vision model has its own protocol selector, because a provider's image endpoint and its chat
+endpoint do not always speak the same shape: **Chat Completions**, **Anthropic Messages** or the
+**Responses** API.
 
 The pickers are driven by the configured lists rather than by the upstream catalogue, because a
 catalogue can omit a model that still answers requests.
@@ -104,7 +117,7 @@ Everything lives under the Harness data directory:
 ```
 $DSH_HOME/plugins-data/pixelfly/
   config.json     upstream, keys (0600), retry policy, defaults
-  history/        the workspace record: versions and conversation
+  history/        the workspace: its version tree and settings
   assets/         every picture, content-addressed by SHA-256
   library.json    saved prompts
 ```

@@ -52,6 +52,9 @@ export const DEFAULT_CONFIG = {
     provider: 'sensenova',
     imagesPath: '/images/generations',
     modelsPath: '/models',
+    // How the vision model is spoken to: `chat` (chat completions, the common
+    // case), `anthropic` (a /messages endpoint) or `responses` (the Responses API).
+    visionFormat: 'chat',
     timeoutMs: 180000,
     visionTimeoutMs: 90000,
   },

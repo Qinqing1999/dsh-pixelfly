@@ -199,6 +199,7 @@ async function postOnce(url, body, apiKey, options) {
         'content-type': 'application/json',
         accept: 'application/json',
         authorization: `Bearer ${apiKey}`,
+        ...(options.extraHeaders ?? {}),
       },
       body: JSON.stringify(body),
       signal: controller.signal,
@@ -273,9 +274,10 @@ export async function postJson(url, body, options = {}) {
     const startedAt = Date.now()
     try {
       const payload = await postOnce(url, body, entry.key, {
-        timeoutMs: config.upstream?.timeoutMs ?? 180000,
+        timeoutMs: options.timeoutMs ?? config.upstream?.timeoutMs ?? 180000,
         signal: options.signal,
         retryOn,
+        extraHeaders: options.extraHeaders,
       })
       pool.markSuccess(entry)
       const row = { attempt, keyId: entry.id, status: 200, ms: Date.now() - startedAt }
