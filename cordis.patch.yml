@@ -1,0 +1,11 @@
+# dsh-pixelfly — image generation for DeepSeek Harness.
+#
+# One row: this package's Host half registers the pixelfly_generate / pixelfly_config /
+# pixelfly_status tools, the /pixelfly/api/* routes, a settings section and a studio page.
+# The `name` must stay the bare package name so the client bundle resolves through the
+# package manifest (`dsh.client` + `exports["./client"]`); a subpath or absolute path here
+# would leave the Host half loaded but the Web half absent.
+- insert:
+    - id: pixelfly-host
+      name: dsh-pixelfly
+      config: {}

@@ -1,0 +1,7 @@
+{
+  "nav": "PixelFly",
+  "settingsTitle": "PixelFly 设置",
+  "settingsSub": "配置上游地址、API Key 与重试策略。配置保存在本机，不会上传。",
+  "studioTitle": "PixelFly 画室",
+  "studioSub": "用商汤日日新 SenseNova 图像模型出图。多 key 轮询，失败自动退避重试。"
+}

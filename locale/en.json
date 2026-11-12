@@ -1,0 +1,7 @@
+{
+  "nav": "PixelFly",
+  "settingsTitle": "PixelFly settings",
+  "settingsSub": "Configure the upstream, API keys and the retry policy. Everything stays on this machine.",
+  "studioTitle": "PixelFly Studio",
+  "studioSub": "Generate images with SenseNova image models. Multiple keys rotate, failures back off and retry."
+}

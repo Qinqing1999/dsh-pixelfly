@@ -1,0 +1,61 @@
+{
+  "name": "dsh-pixelfly",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "PixelFly for DeepSeek Harness: image generation against an OpenAI-compatible upstream (SenseNova image models), with a settings page for the upstream URL and a rotating multi-key ring, exponential backoff with jitter, and a studio page for generating and browsing images.",
+  "license": "MIT",
+  "author": "Qinqing1999",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Qinqing1999/dsh-pixelfly.git"
+  },
+  "homepage": "https://github.com/Qinqing1999/dsh-pixelfly#readme",
+  "bugs": {
+    "url": "https://github.com/Qinqing1999/dsh-pixelfly/issues"
+  },
+  "icon": "./icon.svg",
+  "engines": {
+    "dsh": ">=0.2.1-rc.2"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "pixelfly",
+    "image-generation",
+    "text-to-image",
+    "sensenova"
+  ],
+  "exports": {
+    ".": "./host/index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "host/index.js",
+    "host/config.js",
+    "host/upstream.js",
+    "host/images.js",
+    "host/generate.js",
+    "host/tools.js",
+    "client.js",
+    "cordis.patch.yml",
+    "dsh.plugin.json",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  }
+}

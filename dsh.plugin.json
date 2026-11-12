@@ -1,0 +1,27 @@
+{
+  "id": "dsh-pixelfly",
+  "version": "0.1.0",
+  "description": "PixelFly for DeepSeek Harness: image generation against an OpenAI-compatible upstream, with a settings page for the upstream URL and a rotating multi-key ring, exponential backoff with jitter, and a studio page for generating and browsing images.",
+  "engines": {
+    "dsh": ">=0.2.1-rc.2"
+  },
+  "contributes": {
+    "tools": [
+      "pixelfly_generate",
+      "pixelfly_config",
+      "pixelfly_status"
+    ],
+    "mcp": [],
+    "commands": [],
+    "skills": []
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "pixelfly",
+    "image-generation",
+    "text-to-image",
+    "sensenova"
+  ]
+}

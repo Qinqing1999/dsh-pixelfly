@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="PixelFly">
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="#12141a"/>
+  <rect x="7" y="7" width="50" height="50" rx="12" fill="none" stroke="#5b8def" stroke-width="2.4" opacity="0.6"/>
+  <path d="M18 45l10-18 8 12 5-7 9 13z" fill="#7aa2f7"/>
+  <circle cx="43" cy="20" r="5" fill="#f7c948"/>
+</svg>
