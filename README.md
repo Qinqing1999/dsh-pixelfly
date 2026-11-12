@@ -8,6 +8,12 @@ agent tools that turn a text prompt into a picture through an OpenAI-compatible
 Everything is configured in the Harness UI — no environment variables, no config files to edit by
 hand.
 
+## Screenshots
+
+![PixelFly Studio](docs/studio.png)
+
+![PixelFly settings](docs/settings.png)
+
 ## Features
 
 - **Settings page** in *Settings → PixelFly*: upstream base URL, request timeout, API keys,
