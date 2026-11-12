@@ -337,7 +337,7 @@ window.__ModuleLoader__.load({
     }
 
     function LangSwitch() {
-      const [, lang, setLang] = useLang()
+      const [lang, setLang] = useLang()
       return h('div', { className: 'dsh-pf-lang', role: 'group' },
         h('button', { type: 'button', className: 'dsh-pf-lang-btn', 'data-active': String(lang === 'zh'), onClick: () => setLang('zh') }, '中文'),
         h('button', { type: 'button', className: 'dsh-pf-lang-btn', 'data-active': String(lang === 'en'), onClick: () => setLang('en') }, 'EN'))
