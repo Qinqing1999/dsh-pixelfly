@@ -140,8 +140,10 @@ window.__ModuleLoader__.load({
         testing: '测试中…',
         remove: '删除',
         clear: '全部清空',
-        enabled: '启用',
-        disabled: '停用',
+        enabled: '已启用',
+        disabled: '已停用',
+        enable: '启用',
+        disable: '停用',
         retry: '重试策略',
         maxAttempts: '最大尝试次数',
         baseDelay: '首次退避（毫秒）',
@@ -213,6 +215,8 @@ window.__ModuleLoader__.load({
         clear: 'Clear all',
         enabled: 'Enabled',
         disabled: 'Disabled',
+        enable: 'Enable',
+        disable: 'Disable',
         retry: 'Retry policy',
         maxAttempts: 'Max attempts',
         baseDelay: 'First backoff (ms)',
@@ -500,7 +504,7 @@ window.__ModuleLoader__.load({
           h('span', { className: entry.enabled ? 'dsh-pf-badge dsh-pf-ok' : 'dsh-pf-badge dsh-pf-muted' }, entry.enabled ? t('enabled') : t('disabled')),
           h('div', { className: 'dsh-pf-key-actions' },
             h('button', { type: 'button', className: 'dsh-pf-btn', disabled: testing, onClick: () => onTest(entry.id) }, testing ? t('testing') : t('test')),
-            h('button', { type: 'button', className: 'dsh-pf-btn', disabled: busy, onClick: () => onToggleKey(entry.id, !entry.enabled) }, entry.enabled ? t('disabled') : t('enabled')),
+            h('button', { type: 'button', className: 'dsh-pf-btn', disabled: busy, onClick: () => onToggleKey(entry.id, !entry.enabled) }, entry.enabled ? t('disable') : t('enable')),
             h('button', { type: 'button', className: 'dsh-pf-btn dsh-pf-btn-danger', disabled: busy, onClick: () => onRemoveKey(entry.id) }, t('remove'))))
       })
 
