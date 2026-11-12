@@ -14,6 +14,10 @@ hand.
 
 ![PixelFly settings](docs/settings.png)
 
+Both surfaces ship in Chinese and English; the toggle is in the top-right of each page.
+
+![PixelFly settings, Chinese](docs/settings-zh.png)
+
 ## Features
 
 - **Settings page** in *Settings → PixelFly*: upstream base URL, request timeout, API keys,
