@@ -192,7 +192,19 @@ export function createTools(ctx) {
         writeConfig({ output: { dir: args.dir.trim() } })
         return { ok: true, message: `Output directory set to ${args.dir.trim()}` }
       }
-      return { ok: true, config: publicConfig(), message: `Pixelfly config at ${pluginRoot()}` }
+      const config = publicConfig()
+      const lines = [
+        `Config directory: ${pluginRoot()}`,
+        `Upstream: ${config.upstream.baseUrl}`,
+        `Timeout: ${config.upstream.timeoutMs} ms`,
+        `Default model: ${config.models.default}`,
+        `Models: ${config.models.items.map((item) => item.id).join(', ')}`,
+        `API keys: ${config.apiKeys.length}`,
+        ...config.apiKeys.map((entry) => `  \u00b7 ${entry.id} ${entry.masked}${entry.enabled ? '' : ' (disabled)'}`),
+        `Retry: up to ${config.retry.maxAttempts} attempts, base ${config.retry.baseDelayMs} ms, ceiling ${config.retry.maxDelayMs} ms, rotate ${config.retry.rotateKeys ? 'on' : 'off'}`,
+        `Output: ${config.output.saveToDisk ? config.output.dir || pluginRoot() : '(not saved to disk)'} (keep ${config.output.keepFiles})`,
+      ]
+      return { ok: true, config, message: lines.join('\n') }
     },
     isConcurrencySafe: () => false,
   }
