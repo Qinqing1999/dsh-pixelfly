@@ -34,10 +34,6 @@ export function workspaceRoot() {
   return path.join(pluginRoot(), 'history')
 }
 
-export function imagesRoot() {
-  return path.join(pluginRoot(), 'images')
-}
-
 /**
  * The sizes an upstream is willing to produce.
  *
@@ -93,11 +89,6 @@ export const DEFAULT_CONFIG = {
     promptExtend: true,
     responseFormat: 'b64_json',
     outputFormat: 'png',
-  },
-  output: {
-    dir: '',
-    saveToDisk: true,
-    keepFiles: 400,
   },
   limits: {
     maxBatch: 50,
@@ -223,7 +214,7 @@ export function publicConfig(config = readConfig()) {
     hasKey: typeof entry.key === 'string' && entry.key.length > 0,
     length: typeof entry.key === 'string' ? entry.key.length : 0,
   }))
-  out.paths = { root: pluginRoot(), config: configPath(), state: statePath(), history: workspaceRoot(), images: imagesRoot() }
+  out.paths = { root: pluginRoot(), config: configPath(), state: statePath(), history: workspaceRoot(), assets: path.join(pluginRoot(), 'assets') }
   out.env = {
     seedKeys: (process.env.PIXELFLY_API_KEYS || '').split(/[\s,]+/).filter(Boolean).length,
     baseUrlOverride: typeof process.env.PIXELFLY_BASE_URL === 'string' ? process.env.PIXELFLY_BASE_URL.trim() : '',
@@ -255,11 +246,6 @@ export function baseUrl(config = readConfig()) {
   return raw.replace(/\/+$/, '')
 }
 
-export function outputDir(config = readConfig()) {
-  const configured = typeof config.output?.dir === 'string' ? config.output.dir.trim() : ''
-  return configured.length > 0 ? path.resolve(configured) : imagesRoot()
-}
-
 export function writeState(state) {
   try {
     writeFileAtomic(statePath(), `${JSON.stringify(state, null, 2)}\n`, 0o600)
@@ -272,10 +258,6 @@ export function readState() {
   } catch {
     return {}
   }
-}
-
-export function ensureImagesRoot() {
-  return ensureDir(imagesRoot())
 }
 
 export { ensureDir, writeFileAtomic }

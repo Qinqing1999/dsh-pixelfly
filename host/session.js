@@ -8,7 +8,7 @@
 import { readConfig, sizesFor } from './config.js'
 import { KeyPool } from './upstream.js'
 import { runOperation } from './operations.js'
-import { readAsset, saveAsset, addVersion, appendMessage, getWorkspace, getVersion, updateRecord } from './store.js'
+import { readAsset, saveAsset, addVersion, appendMessage, getWorkspace, getVersion, updateWorkspace } from './store.js'
 import { probe } from './raster.js'
 
 /**
@@ -19,7 +19,7 @@ import { probe } from './raster.js'
  */
 function resolveSource(workspace, versionId) {
   if (typeof versionId === 'string' && versionId.length > 0) {
-    const version = getVersion(workspace.id, versionId)
+    const version = getVersion(versionId)
     const assetId = version.images?.[0]
     if (!assetId) return { version, source: null }
     return { version, source: { buffer: readAsset(assetId), mediaType: 'image/png' }, assetId }
@@ -111,7 +111,7 @@ export async function execute(operation, input, options = {}) {
     throw new Error('The operation produced no picture')
   }
 
-  const { version } = addVersion(workspace.id, {
+  const { version } = addVersion({
     parentId,
     op: operation,
     label: result.label,
@@ -126,10 +126,10 @@ export async function execute(operation, input, options = {}) {
 
   if (operation === 'distill') {
     const current = getWorkspace()
-    updateRecord(current.id, { stylePrompt: current.stylePrompt || result.prompt })
+    updateWorkspace({ stylePrompt: current.stylePrompt || result.prompt })
   }
 
-  appendMessage(workspace.id, {
+  appendMessage({
     role: 'assistant',
     kind: operation,
     text: result.label ?? operation,

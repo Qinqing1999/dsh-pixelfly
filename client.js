@@ -290,9 +290,6 @@ window.__ModuleLoader__.load({
         limitsTitle: '限制',
         maxBatch: '批量上限',
         visionMaxSide: '视觉图片边长',
-        outputTitle: '输出',
-        outputDir: '输出目录',
-        keepFiles: '保留文件数',
         statusTitle: '状态',
         save: '保存',
         saved: '已保存',
@@ -442,9 +439,6 @@ window.__ModuleLoader__.load({
         limitsTitle: 'Limits',
         maxBatch: 'Batch cap',
         visionMaxSide: 'Vision image side',
-        outputTitle: 'Output',
-        outputDir: 'Output folder',
-        keepFiles: 'Files to keep',
         statusTitle: 'Status',
         save: 'Save',
         saved: 'Saved',
@@ -465,6 +459,14 @@ window.__ModuleLoader__.load({
     function useOpLabel() {
       const [value] = useLang()
       return useCallback((id) => STRINGS[value]?.ops?.[id] ?? STRINGS.en.ops[id] ?? id, [value])
+    }
+
+    function LangSwitch() {
+      const [value, setValue] = useLang()
+      return h('div', { className: 'dsh-pf-lang', role: 'group', 'aria-label': 'Language' },
+        h('button', { type: 'button', className: 'dsh-pf-lang-btn', 'data-active': String(value === 'zh'), onClick: () => setValue('zh') }, '中文'),
+        h('button', { type: 'button', className: 'dsh-pf-lang-btn', 'data-active': String(value === 'en'), onClick: () => setValue('en') }, 'EN'),
+      )
     }
 
     // -----------------------------------------------------------------------
@@ -499,6 +501,10 @@ window.__ModuleLoader__.load({
       '.dsh-pf-chip.ok{color:var(--dsw-alias-state-success-primary);border-color:currentColor}',
       '.dsh-pf-chip.bad{color:var(--dsw-alias-state-error-primary);border-color:currentColor}',
       '.dsh-pf-chip.brand{color:var(--dsw-alias-brand-primary);border-color:currentColor}',
+      '.dsh-pf-lang{display:inline-flex;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;overflow:hidden;flex:none}',
+      '.dsh-pf-lang-btn{appearance:none;-webkit-appearance:none;border:0!important;background:transparent!important;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;line-height:1;padding:5px 9px;cursor:pointer;border-radius:0!important}',
+      '.dsh-pf-lang-btn:hover{color:var(--dsw-alias-label-primary)!important;background:var(--dsw-alias-bg-layer-2)!important}',
+      '.dsh-pf-lang-btn[data-active="true"]{color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-layer-2);font-weight:600}',
       '.dsh-pf-lib{padding:14px;overflow:auto;flex:1;min-height:0}',
       '.dsh-pf-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-top:12px}',
       '.dsh-pf-tile{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:10px;overflow:hidden;cursor:pointer;display:flex;flex-direction:column;text-align:left}',
@@ -1235,6 +1241,7 @@ window.__ModuleLoader__.load({
             h('div', { className: 'dsh-pf-title' }, t('brand')),
             h('div', { className: 'dsh-pf-sub' }, `${versions.length} ${t('versions')}`),
           ),
+          h(LangSwitch, null),
           h('button', { className: 'dsh-pf-ghost', title: t('clearHistory'), onClick: clearHistory }, h(Icon, { name: 'trash', size: 14 })),
         ),
         h(
@@ -1420,7 +1427,7 @@ window.__ModuleLoader__.load({
       return h(
         'div',
         { className: `dsh-pf-key${entry.enabled ? '' : ' off'}` },
-        h('code', null, entry.mask ?? '—'),
+        h('code', null, entry.masked || '—'),
         entry.label ? h('span', { className: 'dsh-pf-note' }, entry.label) : null,
         h('span', { className: 'dsh-pf-grow' }),
         result
@@ -1473,7 +1480,6 @@ window.__ModuleLoader__.load({
             upstream: draft.upstream,
             retry: draft.retry,
             request: draft.request,
-            output: draft.output,
             models: { default: draft.models?.default, visionDefault: draft.models?.visionDefault },
             limits: draft.limits,
           } })
@@ -1545,6 +1551,7 @@ window.__ModuleLoader__.load({
         'div',
         { className: 'dsh-pf', style: { padding: 4 } },
         h(Style),
+        h('div', { className: 'dsh-pf-row', style: { justifyContent: 'flex-end', marginBottom: 8 } }, h(LangSwitch, null)),
         h('div', { className: 'dsh-pf-card' },
           h('div', { className: 'dsh-pf-h' }, t('upstream')),
           h('div', { className: 'dsh-pf-row' },
@@ -1677,12 +1684,9 @@ window.__ModuleLoader__.load({
             h(Field, { label: t('visionMaxSide'), grow: 1 },
               h('input', { type: 'number', value: draft.limits?.visionMaxSide ?? 768, onChange: (event) => patch(['limits', 'visionMaxSide'], Number(event.target.value)) }),
             ),
-            h(Field, { label: t('keepFiles'), grow: 1 },
-              h('input', { type: 'number', value: draft.output?.keepFiles ?? 400, onChange: (event) => patch(['output', 'keepFiles'], Number(event.target.value)) }),
-            ),
           ),
           resolved ? h('div', { className: 'dsh-pf-note', style: { marginTop: 8 } },
-            `${t('outputDir')}: ${resolved.outputDir ?? '—'} · ${t('keyCount')}: ${resolved.keyCount ?? 0}`) : null,
+            `${t('keyCount')}: ${resolved.keyCount ?? 0}`) : null,
         ),
         h('div', { className: 'dsh-pf-row', style: { marginTop: 12, justifyContent: 'flex-end' } },
           h('button', { onClick: load }, t('cancel')),

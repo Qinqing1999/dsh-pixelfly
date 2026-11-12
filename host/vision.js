@@ -167,7 +167,11 @@ export async function planJson({ config, model, instruction, images, context, va
 /** A vision model row from the discovered model list, or a clear failure. */
 export function visionModelOrThrow(config, modelId) {
   const items = Array.isArray(config.models?.visionItems) ? config.models.visionItems : []
-  const id = modelId ?? config.models?.visionDefault ?? ''
+  // An empty string is what "nothing was chosen" looks like after a workspace round
+  // trip, and `??` does not treat it as absent, so it has to be normalised here or a
+  // configured default would never be used.
+  const chosen = typeof modelId === 'string' && modelId.trim().length > 0 ? modelId.trim() : ''
+  const id = chosen || config.models?.visionDefault || ''
   const found = items.find((item) => item.id === id)
   if (!found) {
     throw new VisionError(

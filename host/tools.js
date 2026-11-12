@@ -21,7 +21,7 @@ import {
   patchVersion,
   readAsset,
   resetWorkspace,
-  updateRecord,
+  updateWorkspace,
 } from './store.js'
 
 const EDIT_OPS = ['edit', 'localEdit', 'fusion', 'outpaint', 'removeWatermark', 'removeBackground', 'removeElement', 'extractAsset', 'editText', 'enhance', 'colorize', 'batchVariables', 'batchList']
@@ -114,7 +114,7 @@ function renderResult(_args, value) {
 export function createTools(ctx) {
   const generate = {
     name: 'pixelfly_generate',
-    description: 'Create a picture from a text prompt with the configured Pixelfly upstream and record it as a new version in the history. Returns the version id and the picture itself. Multiple API keys are rotated automatically with exponential backoff on rate limits and transient failures.',
+    description: 'Create a picture from a text prompt with the configured Pixelfly upstream and save it as a new version in the history. Returns the version id and the picture itself. Multiple API keys are rotated automatically with exponential backoff on rate limits and transient failures.',
     parameters: {
       type: 'object',
       properties: {
@@ -141,7 +141,7 @@ export function createTools(ctx) {
 
   const edit = {
     name: 'pixelfly_edit',
-    description: 'Transform an existing picture and record the result as a new version: prompt-based editing, regional repaint, reference fusion, outpainting, watermark removal, background removal, element removal, asset extraction, in-image text editing, enhancement, colourisation, and batch runs over a prompt list or [variable] matrix.',
+    description: 'Transform an existing picture and save the result as a new version: prompt-based editing, regional repaint, reference fusion, outpainting, watermark removal, background removal, element removal, asset extraction, in-image text editing, enhancement, colourisation, and batch runs over a prompt list or [variable] matrix.',
     parameters: {
       type: 'object',
       properties: {
@@ -245,13 +245,13 @@ export function createTools(ctx) {
       if (action === 'star') {
         const versionId = typeof args?.versionId === 'string' && args.versionId ? args.versionId : workspace.currentVersionId
         if (!versionId) return { ok: false, message: 'There are no versions to star yet.' }
-        patchVersion(workspace.id, versionId, { starred: args?.starred !== false })
+        patchVersion(versionId, { starred: args?.starred !== false })
         return { ok: true, message: `${args?.starred === false ? 'Unstarred' : 'Starred'} ${versionId}` }
       }
       if (action === 'delete') {
         const versionId = typeof args?.versionId === 'string' && args.versionId ? args.versionId : workspace.currentVersionId
         if (!versionId) return { ok: false, message: 'There are no versions to delete.' }
-        const result = deleteVersion(workspace.id, versionId)
+        deleteVersion(versionId)
         return { ok: true, message: `Deleted ${versionId}` }
       }
       if (action === 'clear') {
@@ -259,7 +259,7 @@ export function createTools(ctx) {
         return { ok: true, message: 'Cleared the version history.' }
       }
       if (action === 'setStyle') {
-        updateRecord(workspace.id, { stylePrompt: String(args?.stylePrompt ?? '') })
+        updateWorkspace({ stylePrompt: String(args?.stylePrompt ?? '') })
         return { ok: true, stylePrompt: String(args?.stylePrompt ?? ''), message: `Style set to: ${args?.stylePrompt || '(none)'}` }
       }
       throw new Error(`unknown action ${action}`)
@@ -269,11 +269,11 @@ export function createTools(ctx) {
 
   const configTool = {
     name: 'pixelfly_config',
-    description: 'Read or update the Pixelfly configuration: upstream base URL and provider, API keys, default image and vision models, retry policy and output directory. Secrets are returned masked.',
+    description: 'Read or update the Pixelfly configuration: upstream base URL and provider, API keys, default image and vision models, retry policy and size limits. Secrets are returned masked.',
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['read', 'setBaseUrl', 'setProvider', 'setDefaultModel', 'setVisionModel', 'addKey', 'removeKey', 'setRetry', 'setOutputDir'], description: 'What to do. Defaults to read.' },
+        action: { type: 'string', enum: ['read', 'setBaseUrl', 'setProvider', 'setDefaultModel', 'setVisionModel', 'addKey', 'removeKey', 'setRetry'], description: 'What to do. Defaults to read.' },
         baseUrl: { type: 'string', description: 'For setBaseUrl: the upstream base URL, e.g. https://token.sensenova.cn/v1' },
         provider: { type: 'string', enum: ['sensenova', 'openai', 'gemini'], description: 'For setProvider: which request shape the upstream speaks.' },
         model: { type: 'string', description: 'For setDefaultModel or setVisionModel: the model id.' },
@@ -282,7 +282,6 @@ export function createTools(ctx) {
         keyId: { type: 'string', description: 'For removeKey: the key id to drop.' },
         maxAttempts: { type: 'integer', description: 'For setRetry: total attempts including the first (1-12).' },
         baseDelayMs: { type: 'integer', description: 'For setRetry: first backoff delay in milliseconds.' },
-        dir: { type: 'string', description: 'For setOutputDir: absolute directory for generated files.' },
       },
     },
     output: {
@@ -336,11 +335,6 @@ export function createTools(ctx) {
         if (Number.isFinite(Number(args.baseDelayMs))) patch.baseDelayMs = Math.max(50, Math.round(Number(args.baseDelayMs)))
         writeConfig({ retry: patch })
         return { ok: true, message: `Retry policy updated: ${JSON.stringify(patch)}` }
-      }
-      if (action === 'setOutputDir') {
-        if (typeof args.dir !== 'string' || args.dir.trim().length === 0) throw new Error('dir is required')
-        writeConfig({ output: { dir: args.dir.trim() } })
-        return { ok: true, message: `Output directory set to ${args.dir.trim()}` }
       }
       const config = publicConfig()
       const lines = [

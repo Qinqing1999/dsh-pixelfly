@@ -12,9 +12,7 @@ import path from 'node:path'
 import {
   activeKeys,
   baseUrl,
-  imagesRoot,
   maskKey,
-  outputDir,
   pluginRoot,
   workspaceRoot,
   publicConfig,
@@ -38,8 +36,6 @@ import {
 } from './operations.js'
 import {
   addLibraryPrompt,
-  addVersion,
-  ancestry,
   appendMessage,
   clearConversation,
   collectGarbage,
@@ -51,11 +47,9 @@ import {
   readAsset,
   readLibrary,
   removeLibraryPrompt,
-  saveAsset,
-  updateRecord,
+  updateWorkspace,
 } from './store.js'
 import { probe } from './raster.js'
-import { createZip } from './zip.js'
 
 export const inject = ['tools']
 
@@ -276,8 +270,6 @@ function configRoute(auth) {
         config: publicConfig(config),
         resolved: {
           baseUrl: baseUrl(config),
-          outputDir: outputDir(config),
-          imageRoot: imagesRoot(),
           workspaceRoot: workspaceRoot(),
           keyCount: activeKeys(config).length,
         },
@@ -348,13 +340,6 @@ function configRoute(auth) {
       if (typeof body.request.promptExtend === 'boolean') request.promptExtend = body.request.promptExtend
       if (Object.keys(request).length > 0) patch.request = request
     }
-    if (body.output && typeof body.output === 'object') {
-      const output = {}
-      if (typeof body.output.dir === 'string') output.dir = body.output.dir.trim()
-      if (typeof body.output.saveToDisk === 'boolean') output.saveToDisk = body.output.saveToDisk
-      if (Number.isFinite(Number(body.output.keepFiles))) output.keepFiles = Math.max(0, Math.min(10000, Math.round(Number(body.output.keepFiles))))
-      if (Object.keys(output).length > 0) patch.output = output
-    }
     if (body.limits && typeof body.limits === 'object') {
       const limits = {}
       if (Number.isFinite(Number(body.limits.maxBatch))) limits.maxBatch = Math.max(2, Math.min(50, Math.round(Number(body.limits.maxBatch))))
@@ -365,7 +350,7 @@ function configRoute(auth) {
     sendJson(res, 200, {
       ok: true,
       config: publicConfig(next),
-      resolved: { baseUrl: baseUrl(next), outputDir: outputDir(next), sizes: sizesFor(next) },
+      resolved: { baseUrl: baseUrl(next), sizes: sizesFor(next) },
     })
   }, auth)
 }
@@ -536,27 +521,27 @@ function workspaceRoute(auth) {
         }
       }
       if (typeof patch.currentVersionId === 'string') clean.currentVersionId = patch.currentVersionId
-      updateRecord(workspace.id, clean)
+      updateWorkspace(clean)
       sendJson(res, 200, { ok: true, workspace: publicWorkspace(getWorkspace()) })
       return
     }
     if (action === 'deleteVersion') {
-      deleteVersion(workspace.id, String(body.versionId ?? ''))
+      deleteVersion(String(body.versionId ?? ''))
       sendJson(res, 200, { ok: true, workspace: publicWorkspace(getWorkspace()) })
       return
     }
     if (action === 'patchVersion') {
-      patchVersion(workspace.id, String(body.versionId ?? ''), body.patch ?? {})
+      patchVersion(String(body.versionId ?? ''), body.patch ?? {})
       sendJson(res, 200, { ok: true, workspace: publicWorkspace(getWorkspace()) })
       return
     }
     if (action === 'clearConversation') {
-      clearConversation(workspace.id)
+      clearConversation()
       sendJson(res, 200, { ok: true, workspace: publicWorkspace(getWorkspace()) })
       return
     }
     if (action === 'message') {
-      appendMessage(workspace.id, { role: 'user', kind: 'note', text: String(body.text ?? '') })
+      appendMessage({ role: 'user', kind: 'note', text: String(body.text ?? '') })
       sendJson(res, 200, { ok: true, workspace: publicWorkspace(getWorkspace()) })
       return
     }
@@ -637,7 +622,7 @@ function recogniseRoute(auth) {
     const workspace = getWorkspace()
     let source = typeof body.image === 'string' && body.image.length > 0 ? decodeUpload(body.image, config) : null
     if (source === null) {
-      const version = getVersion(workspace.id, body.versionId ?? workspace.currentVersionId)
+      const version = getVersion(body.versionId ?? workspace.currentVersionId)
       const assetId = version.images?.[0]
       if (assetId) source = { buffer: readAsset(assetId), mediaType: 'image/png' }
     }
@@ -645,7 +630,7 @@ function recogniseRoute(auth) {
     const result = await recogniseText({ source, visionModel: body.visionModel }, {
       config,
       model: config.models?.default,
-      visionModel: body.visionModel ?? workspace.models?.vision ?? config.models?.visionDefault,
+      visionModel: body.visionModel || workspace.models?.vision || config.models?.visionDefault,
     })
     sendJson(res, 200, { ok: true, ...result })
   }, auth)
@@ -660,25 +645,6 @@ function assetRoute(auth) {
     const info = await probe(bytes).catch(() => null)
     const mediaType = info?.format === 'jpeg' ? 'image/jpeg' : info?.format === 'webp' ? 'image/webp' : 'image/png'
     sendBinary(res, 200, mediaType, bytes)
-  }, auth)
-}
-
-function versionZipRoute(auth) {
-  return guarded(async (req, res) => {
-    if (req.method !== 'GET') return sendJson(res, 405, { ok: false, error: 'GET only' })
-    const params = searchOf(req)
-    const workspace = getWorkspace()
-    const version = getVersion(workspace.id, params.get('versionId') ?? workspace.currentVersionId)
-    const entries = []
-    for (let index = 0; index < (version.images ?? []).length; index += 1) {
-      entries.push({ name: `pixelfly-${version.id}-${index + 1}.png`, data: readAsset(version.images[index]) })
-    }
-    if (entries.length === 0) return sendJson(res, 404, { ok: false, error: 'that version has no images' })
-    const zip = createZip(entries)
-    sendBinary(res, 200, 'application/zip', zip, {
-      disposition: `attachment; filename="pixelfly-${version.id}.zip"`,
-      cacheControl: 'no-store',
-    })
   }, auth)
 }
 
@@ -718,7 +684,6 @@ function statsRoute(auth) {
     sendJson(res, 200, {
       ok: true,
       baseUrl: baseUrl(config),
-      outputDir: outputDir(config),
       keyCount: keys.length,
       retry: config.retry,
       models: config.models,
@@ -750,7 +715,6 @@ export function apply(ctx, config) {
     [`${ROUTE_BASE}/preview`, previewRoute(auth)],
     [`${ROUTE_BASE}/recognise`, recogniseRoute(auth)],
     [`${ROUTE_BASE}/asset`, assetRoute(auth)],
-    [`${ROUTE_BASE}/version.zip`, versionZipRoute(auth)],
     [`${ROUTE_BASE}/library`, libraryRoute(auth)],
     [`${ROUTE_BASE}/stats`, statsRoute(auth)],
   ]

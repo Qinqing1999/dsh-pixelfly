@@ -1,12 +1,12 @@
 # dsh-pixelfly
 
-Image generation for **DeepSeek Harness**. Pixelfly adds a settings page, a studio page and three
-agent tools that turn a text prompt into a picture through an OpenAI-compatible
-`/images/generations` upstream (tuned for the SenseNova image models
-`sensenova-u1.5-fast` and `sensenova-u1.5-lite`).
+An image studio for **DeepSeek Harness**. Pixelfly turns a prompt into a picture, then lets you keep
+working on it — repaint a region, remove something, replace the background, change the text on a
+sign, extend the canvas — and keeps every result as a step in one version tree you can compare and
+revisit.
 
-Everything is configured in the Harness UI — no environment variables, no config files to edit by
-hand.
+Everything is configured in the Harness UI. There are no environment variables to set and no config
+file to hand-edit.
 
 ## Screenshots
 
@@ -18,20 +18,74 @@ Both surfaces ship in Chinese and English; the toggle is in the top-right of eac
 
 ![PixelFly settings, Chinese](docs/settings-zh.png)
 
-## Features
+## What it does
 
-- **Settings page** in *Settings → PixelFly*: upstream base URL, request timeout, API keys,
-  retry policy, default model, default size, output directory.
-- **Multi-key ring** with round-robin rotation. A rejected key (401/402/403) is put on cooldown and
-  the very next attempt uses a *different* key — a bad key never aborts the run.
-- **Exponential backoff with jitter** on `429`/`5xx`/network errors, capped by a configurable
-  ceiling, and `Retry-After` is honoured when the upstream sends it.
-- **Studio page** in the sidebar: prompt, model, size, count, live attempt trace, the resulting
-  image, and a gallery of recent generations.
-- **Agent tools** so the model can generate images mid-conversation:
-  `pixelfly_generate`, `pixelfly_config`, `pixelfly_status`.
-- **Keys never leave the machine.** They are stored `0600` under the Harness data directory and the
+One workspace, one history. There is no library of projects to manage: every run becomes a version
+whose parent is the picture you were working on, so the tree shows how a picture evolved and any
+node can be reopened or compared with another.
+
+The toolbar has ten operations:
+
+| Operation | What it needs | What it does |
+| --- | --- | --- |
+| **Text to image** | prompt | Draws a new picture. |
+| **Prompt edit** | prompt | Repaints the whole picture from an instruction. |
+| **Regional repaint** | selection + prompt | Redraws only the area you drag over. |
+| **Remove element** | boxes + preset | Erases clutter, passers-by, text or a stray object, optionally protecting boxes you keep. |
+| **Extract asset** | box + kind | Lifts one object out onto a clean white catalogue background. |
+| **Remove background** | — | Cuts the subject out to transparency. |
+| **Outpaint** | new size | Grows the canvas and paints the new area. |
+| **Enhance** | strength | Sharpens detail and light at three strengths. |
+| **Remove watermark** | box (optional) | Finds a watermark with the vision model, or uses your box, and rebuilds what was underneath. |
+| **Edit text** | regions | Reads the text in the picture, then replaces or clears any region of it. |
+| **Colour and line art** | mode | Recolours a picture, or turns it into line art and back. |
+| **Reference fusion** | reference + prompt | Puts a subject from a reference picture into this one, or dresses, poses or groups it. |
+| **Batch** | prompt list or variables | Runs many prompts, or every combination of `[variable]` values, as separate versions. |
+
+Selecting a region is a drag on the picture; the selection stays as percentages so it still means the
+same thing whatever size the model answers with.
+
+## How a regional edit stays seamless
+
+A model asked to "change only this box" of a full frame tends to paint that box as its own little
+picture, with its own backdrop and lighting, and the result reads as a rectangle pasted on. Pixelfly
+sends a **padded crop** instead — real surrounding pixels sit right against the area to change, and
+models continue what they can see — then pastes back only the part of the answer that lines up with
+the selection, corrects its colour against the border ring, and feathers it in with a smoothstep
+ramp.
+
+## Keys and retries
+
+- **A ring of API keys.** Requests rotate round-robin. A rejected key (`401`/`402`/`403`) is cooled
+  down and the *next* attempt uses a different key, so one bad key never aborts a run.
+- **Exponential backoff with jitter** on `429`/`5xx` and network errors, capped by a configurable
+  ceiling, honouring `Retry-After` when the upstream sends one.
+- **Nothing is written to logs.** Keys live in a `0600` file under the Harness data directory and the
   UI only ever receives a mask such as `sk-a1b2…z9y8`.
+
+## Models
+
+Two roles, both configurable:
+
+- **Image model** — the one that draws. Tuned and tested with the SenseNova image models
+  `sensenova-u1.5-fast` and `sensenova-u1.5-lite`; any OpenAI-compatible image endpoint works.
+- **Vision model** — the one that looks. Used to plan a repaint, find a watermark, name the subject
+  for background removal, and read text in a picture. Defaults to the SenseNova chat models.
+
+The pickers are driven by the configured lists rather than by the upstream catalogue, because a
+catalogue can omit a model that still answers requests.
+
+## Agent tools
+
+The model can drive the studio mid-conversation:
+
+| Tool | Purpose |
+| --- | --- |
+| `pixelfly_generate` | Draw a picture from a prompt. |
+| `pixelfly_edit` | Any of the edit operations above, against the current picture or a given version. |
+| `pixelfly_history` | List, inspect, star, delete or clear versions; set the workspace style. |
+| `pixelfly_config` | Read or change the upstream, keys, retry policy and defaults. |
+| `pixelfly_status` | Keys, versions, sizes and the operation catalogue. |
 
 ## Install
 
@@ -40,111 +94,23 @@ Both surfaces ship in Chinese and English; the toggle is in the top-right of eac
 dsh plugin --profile web add file:/path/to/dsh-pixelfly
 ```
 
-Then add the bundle to the profile's `package.json` (`dsh.profile.bundles`) and a row to its
-`cordis.patch.yml`:
+Then open **Settings → PixelFly**, paste your upstream base URL and at least one API key, and press
+**Test** next to a key to confirm it works.
 
-```yaml
-- insert:
-    - id: pixelfly-host
-      name: dsh-pixelfly
-      config: {}
-```
+## Data
 
-Restart the Harness. The plugin appears in *Settings* and as a sidebar icon.
-
-### Serving the Web UI beyond loopback
-
-Named HTTP routes are loopback-only by default. If your Harness is reachable on a LAN address or
-behind a tunnel, widen the fence explicitly — exactly as you would for the Harness' own
-`--trusted-host`:
-
-```yaml
-- insert:
-    - id: pixelfly-host
-      name: dsh-pixelfly
-      config:
-        allowNonLoopback: true
-        trustedHosts:
-          - '192.168.1.10:8888'
-```
-
-Requests still need the per-process bearer token that the browser half fetches from
-`GET /pixelfly/api/token`, and cross-origin callers are rejected.
-
-## Configuration
-
-| Setting | Default | Notes |
-| --- | --- | --- |
-| Upstream base URL | `https://token.sensenova.cn/v1` | Any OpenAI-compatible base URL |
-| Request timeout | `180000` ms | Image models are slow; do not set this low |
-| Default model | `sensenova-u1.5-fast` | `sensenova-u1.5-lite` is the cheaper one |
-| Default size | `1024x1024` | Passed straight to the upstream |
-| Max attempts | `4` | Never less than one pass over the key ring |
-| Base delay | `700` ms | Doubles per retry |
-| Max delay | `20000` ms | Backoff ceiling |
-| Jitter | `0.25` | ±12.5% band, avoids lock-step retries |
-| Key cooldown | `60000` ms | How long a rejected key sits out |
-| Keep files | `200` | Older images are pruned automatically |
-
-Data lives in `$DSH_HOME/plugins-data/pixelfly/` (default `~/.dsh/plugins-data/pixelfly/`):
-`config.json`, `state.json`, `images/`, and `http.token`.
-
-Environment overrides for CI or headless use: `PIXELFLY_BASE_URL`, `PIXELFLY_API_KEYS`
-(whitespace- or comma-separated, used when no key is configured in the UI), `PIXELFLY_HTTP_TOKEN`.
-
-## Tools
-
-```jsonc
-// pixelfly_generate
-{ "prompt": "a lighthouse on a cliff at dusk, painterly",
-  "model": "sensenova-u1.5-fast", "size": "1024x1024", "n": 1 }
-```
-
-Returns the saved file paths, image dimensions, token usage and the attempt trace. When the Harness
-attachment store is available the image is also attached to the conversation, so it renders inline
-and stays readable by `read_image`.
-
-```jsonc
-// pixelfly_config — read or change settings without opening the UI
-{ "action": "read" }
-{ "action": "addKey", "key": "sk-…", "label": "work" }
-{ "action": "setDefaultModel", "model": "sensenova-u1.5-lite" }
-
-// pixelfly_status — masked keys, cooldowns, recent files, optional live probe
-{ "probe": true }
-```
-
-## HTTP API
-
-All routes require `Authorization: Bearer <token>` from `GET /pixelfly/api/token`.
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/pixelfly/api/config` | Public config, resolved paths, last run |
-| `POST` | `/pixelfly/api/config` | Whitelisted settings patch |
-| `GET`/`POST`/`DELETE` | `/pixelfly/api/keys` | List, add/remove/toggle/clear keys |
-| `POST` | `/pixelfly/api/test` | Probe each key against the models endpoint |
-| `GET` | `/pixelfly/api/models` | List upstream models |
-| `POST` | `/pixelfly/api/generate` | Generate images |
-| `GET` | `/pixelfly/api/gallery` | Recent generated files |
-| `GET` | `/pixelfly/api/file?path=…` | Serve one generated file (traversal-guarded) |
-| `GET` | `/pixelfly/api/stats` | Key ring snapshot |
-
-## Layout
+Everything lives under the Harness data directory:
 
 ```
-host/index.js     routes, HTTP fence, plugin entry (apply/inject)
-host/config.js    config + state on disk, masking, env overrides
-host/upstream.js  key ring, backoff, error mapping, HTTP client
-host/images.js    PNG/JPEG/WebP/GIF sniffing, save, prune, gallery
-host/generate.js  request building, orchestration, history
-host/tools.js     the three agent tools
-client.js         settings section, studio page, sidebar icon
+$DSH_HOME/plugins-data/pixelfly/
+  config.json     upstream, keys (0600), retry policy, defaults
+  history/        the workspace record: versions and conversation
+  assets/         every picture, content-addressed by SHA-256
+  library.json    saved prompts
 ```
 
-The Host half is plain ESM with no build step; the Web half is a single lazy-CJS bundle that only
-requires `react`.
+Delete the folder to start over; nothing else on the machine is touched.
 
-## License
+## Licence
 
-MIT
+MIT.

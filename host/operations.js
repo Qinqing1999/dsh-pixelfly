@@ -136,7 +136,11 @@ function applicabilityValidator(shape) {
 }
 
 function requireVisionModel(context, explicit) {
-  return visionModelOrThrow(context.config, explicit ?? context.visionModel).id
+  // The same empty-string trap as in vision.js: a blank selection must fall through
+  // to the configured default rather than count as a chosen model.
+  const picked = typeof explicit === 'string' && explicit.trim().length > 0 ? explicit.trim() : ''
+  const fallback = typeof context.visionModel === 'string' && context.visionModel.trim().length > 0 ? context.visionModel.trim() : ''
+  return visionModelOrThrow(context.config, picked || fallback).id
 }
 
 // ---------------------------------------------------------------------------

@@ -1,14 +1,13 @@
-// dsh-pixelfly — the workspace record, the version tree and the asset store.
+// dsh-pixelfly — the workspace, the version tree and the asset store.
 //
-// A picture is never edited in place. Every operation produces a new *version*
-// whose `parentId` points at the version it was derived from, so the whole history
-// is a forest: one root per "idea", and every branch is a choice the user made.
-// That is what makes "compare with the previous one" and "go back and try a
-// different direction" possible at all.
+// There is one workspace and nothing else to choose between. A picture is never
+// edited in place: every operation produces a new *version* whose `parentId`
+// points at the version it was derived from, so the history is a tree and every
+// branch is a choice the user made. That is what makes "compare with the previous
+// one" and "go back and try a different direction" possible at all.
 //
 // Image bytes live in a content-addressed store keyed by sha256, so the same
-// picture reached by two different paths is stored once, and duplicating a
-// record copies no bytes.
+// picture reached by two different paths is stored once.
 
 import crypto from 'node:crypto'
 import fs from 'node:fs'
@@ -29,7 +28,7 @@ export class StoreError extends Error {
 // assets
 // ---------------------------------------------------------------------------
 
-export function assetsRoot() {
+function assetsRoot() {
   return path.join(pluginRoot(), 'assets')
 }
 
@@ -37,7 +36,7 @@ function assetDir(id) {
   return path.join(assetsRoot(), id.slice(0, 2))
 }
 
-export function assetPath(id) {
+function assetPath(id) {
   return path.join(assetDir(id), id)
 }
 
@@ -76,22 +75,13 @@ export function readAsset(id) {
   return fs.readFileSync(target)
 }
 
-export function hasAsset(id) {
-  try {
-    return fs.statSync(assetPath(id)).isFile()
-  } catch {
-    return false
-  }
-}
-
-/** Drop assets no record references any more. */
+/** Drop assets the workspace no longer references. */
 export function collectGarbage() {
   const referenced = new Set()
-  for (const summary of listRecords()) {
-    const record = readRecordFile(summary.id)
-    if (record === null) continue
-    if (record.cover) referenced.add(record.cover)
-    for (const version of record.versions) {
+  const workspace = readWorkspaceFile()
+  if (workspace !== null) {
+    if (workspace.cover) referenced.add(workspace.cover)
+    for (const version of workspace.versions) {
       for (const id of version.images ?? []) referenced.add(id)
       if (version.thumb) referenced.add(version.thumb)
     }
@@ -114,34 +104,30 @@ export function collectGarbage() {
 }
 
 // ---------------------------------------------------------------------------
-// record files
+// the workspace
 // ---------------------------------------------------------------------------
 
-function recordDir(id) {
-  if (typeof id !== 'string' || !/^[a-z0-9][a-z0-9-]{2,40}$/.test(id)) {
-    throw new StoreError('Malformed record id', 'bad_id')
-  }
-  return path.join(workspaceRoot(), id)
+/** There is exactly one workspace; it is created on first use. */
+const WORKSPACE_ID = 'workspace'
+
+function workspaceDir() {
+  return path.join(workspaceRoot(), WORKSPACE_ID)
 }
 
-function recordFile(id) {
-  return path.join(recordDir(id), 'record.json')
+function workspaceFile() {
+  return path.join(workspaceDir(), 'record.json')
 }
 
-export function newId(prefix = 'p') {
+function newId(prefix = 'p') {
   const stamp = Date.now().toString(36)
   const noise = crypto.randomBytes(4).toString('hex')
   return `${prefix}-${stamp}-${noise}`
 }
 
-function emptyRecord(name) {
+function emptyWorkspace() {
   const now = new Date().toISOString()
   return {
-    id: newId('prj'),
-    name: typeof name === 'string' && name.trim().length > 0 ? name.trim().slice(0, 120) : 'Untitled record',
-    description: '',
-    favorite: false,
-    archived: false,
+    id: WORKSPACE_ID,
     createdAt: now,
     updatedAt: now,
     stylePrompt: '',
@@ -153,10 +139,10 @@ function emptyRecord(name) {
   }
 }
 
-function readRecordFile(id) {
+function readWorkspaceFile() {
   let text = ''
   try {
-    text = fs.readFileSync(recordFile(id), 'utf8')
+    text = fs.readFileSync(workspaceFile(), 'utf8')
   } catch {
     return null
   }
@@ -170,35 +156,23 @@ function readRecordFile(id) {
   }
 }
 
-function writeRecord(record) {
-  record.updatedAt = new Date().toISOString()
-  ensureDir(recordDir(record.id))
-  writeFileAtomic(recordFile(record.id), `${JSON.stringify(record, null, 2)}\n`, 0o600)
-  return record
+function writeWorkspace(workspace) {
+  workspace.updatedAt = new Date().toISOString()
+  ensureDir(workspaceDir())
+  writeFileAtomic(workspaceFile(), `${JSON.stringify(workspace, null, 2)}\n`, 0o600)
+  return workspace
 }
-
-/** The single workspace id. There is exactly one, created on first use. */
-export const WORKSPACE_ID = 'workspace'
 
 /**
  * The one workspace everything runs in.
  *
- * Keeping a single record means the version tree is the only thing that grows, and
- * an operation never has to ask which container it belongs to.
+ * Keeping a single container means the version tree is the only thing that grows,
+ * and an operation never has to ask which container it belongs to.
  */
-export function ensureWorkspace() {
-  const existing = readRecordFile(WORKSPACE_ID)
+function ensureWorkspace() {
+  const existing = readWorkspaceFile()
   if (existing !== null) return existing
-  const now = new Date().toISOString()
-  const workspace = {
-    ...emptyRecord('Workspace'),
-    id: WORKSPACE_ID,
-    name: 'Workspace',
-    createdAt: now,
-    updatedAt: now,
-  }
-  writeRecord(workspace)
-  return workspace
+  return writeWorkspace(emptyWorkspace())
 }
 
 /** The workspace, always present. */
@@ -213,124 +187,20 @@ export function resetWorkspace() {
   workspace.conversation = []
   workspace.currentVersionId = ''
   workspace.cover = ''
-  writeRecord(workspace)
-  return workspace
+  return writeWorkspace(workspace)
 }
 
-/** Create a record and return it. */
-export function createRecord(input = {}) {
-  const record = emptyRecord(input.name)
-  if (typeof input.description === 'string') record.description = input.description.slice(0, 2000)
-  if (typeof input.stylePrompt === 'string') record.stylePrompt = input.stylePrompt.slice(0, 4000)
-  if (input.models && typeof input.models === 'object') {
-    record.models.image = typeof input.models.image === 'string' ? input.models.image : ''
-    record.models.vision = typeof input.models.vision === 'string' ? input.models.vision : ''
-  }
-  writeRecord(record)
-  return record
-}
-
-export function getRecord(id) {
-  const record = readRecordFile(id)
-  if (record === null) throw new StoreError('No such record', 'not_found')
-  return record
-}
-
-/** A summary row for the library view: no version payloads. */
-export function summariseRecord(record) {
-  const versions = record.versions ?? []
-  const live = versions.filter((version) => version.status !== 'failed')
-  const latest = live[live.length - 1]
-  const cover = record.cover || latest?.images?.[0] || latest?.thumb || ''
-  return {
-    id: record.id,
-    name: record.name,
-    description: record.description ?? '',
-    favorite: record.favorite === true,
-    archived: record.archived === true,
-    createdAt: record.createdAt,
-    updatedAt: record.updatedAt,
-    cover,
-    versionCount: versions.length,
-    imageCount: versions.reduce((total, version) => total + (version.images?.length ?? 0), 0),
-    currentVersionId: record.currentVersionId ?? '',
-    models: record.models ?? { image: '', vision: '' },
-    lastPrompt: latest?.prompt ?? '',
-  }
-}
-
-/** Every record, newest first, with optional search/filter. */
-export function listRecords(query = {}) {
-  let ids = []
-  try {
-    ids = fs.readdirSync(workspaceRoot()).filter((name) => /^prj-/.test(name))
-  } catch {
-    return []
-  }
-  const rows = []
-  for (const id of ids) {
-    const record = readRecordFile(id)
-    if (record === null) continue
-    if (query.archived !== true && record.archived === true) continue
-    if (query.archived === true && record.archived !== true) continue
-    if (query.favorite === true && record.favorite !== true) continue
-    if (typeof query.search === 'string' && query.search.trim().length > 0) {
-      const needle = query.search.trim().toLowerCase()
-      const haystack = `${record.name}\n${record.description ?? ''}\n${(record.versions ?? []).map((version) => version.prompt ?? '').join('\n')}`.toLowerCase()
-      if (!haystack.includes(needle)) continue
-    }
-    rows.push(summariseRecord(record))
-  }
-  rows.sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)))
-  return rows
-}
-
-/** Patch the mutable record fields. */
-export function updateRecord(id, patch = {}) {
-  const record = getRecord(id)
-  if (typeof patch.name === 'string' && patch.name.trim().length > 0) record.name = patch.name.trim().slice(0, 120)
-  if (typeof patch.description === 'string') record.description = patch.description.slice(0, 2000)
-  if (typeof patch.stylePrompt === 'string') record.stylePrompt = patch.stylePrompt.slice(0, 4000)
-  if (typeof patch.favorite === 'boolean') record.favorite = patch.favorite
-  if (typeof patch.archived === 'boolean') record.archived = patch.archived
-  if (typeof patch.cover === 'string') record.cover = patch.cover
-  if (typeof patch.currentVersionId === 'string') record.currentVersionId = patch.currentVersionId
+/** Patch the workspace's own settings: style prompt, models, current version, cover. */
+export function updateWorkspace(patch = {}) {
+  const workspace = ensureWorkspace()
+  if (typeof patch.stylePrompt === 'string') workspace.stylePrompt = patch.stylePrompt.slice(0, 4000)
+  if (typeof patch.cover === 'string') workspace.cover = patch.cover
+  if (typeof patch.currentVersionId === 'string') workspace.currentVersionId = patch.currentVersionId
   if (patch.models && typeof patch.models === 'object') {
-    if (typeof patch.models.image === 'string') record.models.image = patch.models.image
-    if (typeof patch.models.vision === 'string') record.models.vision = patch.models.vision
+    if (typeof patch.models.image === 'string') workspace.models.image = patch.models.image
+    if (typeof patch.models.vision === 'string') workspace.models.vision = patch.models.vision
   }
-  return writeRecord(record)
-}
-
-/** Soft-delete: the directory is removed, so a restore needs a backup. */
-export function deleteRecord(id) {
-  const dir = recordDir(id)
-  getRecord(id)
-  fs.rmSync(dir, { recursive: true, force: true })
-  return { id, deleted: true }
-}
-
-/** Copy a record, keeping the version tree and sharing its assets. */
-export function duplicateRecord(id) {
-  const source = getRecord(id)
-  const copy = JSON.parse(JSON.stringify(source))
-  copy.id = newId('prj')
-  copy.name = `${source.name} copy`.slice(0, 120)
-  copy.createdAt = new Date().toISOString()
-  copy.updatedAt = copy.createdAt
-  copy.favorite = false
-  const remap = new Map()
-  for (const version of copy.versions) {
-    const next = newId('v')
-    remap.set(version.id, next)
-    version.id = next
-  }
-  for (const version of copy.versions) {
-    version.parentId = version.parentId ? remap.get(version.parentId) ?? '' : ''
-  }
-  copy.currentVersionId = remap.get(source.currentVersionId) ?? copy.versions[copy.versions.length - 1]?.id ?? ''
-  writeRecord(copy)
-  return copy
+  return writeWorkspace(workspace)
 }
 
 // ---------------------------------------------------------------------------
@@ -341,12 +211,12 @@ export function duplicateRecord(id) {
  * Append a version under `parentId`.
  *
  * `images` is a list of asset ids. The first image of a successful version
- * becomes the record's cover unless one was set explicitly.
+ * becomes the workspace's cover unless one was set explicitly.
  */
-export function addVersion(recordId, input = {}) {
-  const record = getRecord(recordId)
+export function addVersion(input = {}) {
+  const workspace = ensureWorkspace()
   const parentId = typeof input.parentId === 'string' ? input.parentId : ''
-  if (parentId.length > 0 && !record.versions.some((version) => version.id === parentId)) {
+  if (parentId.length > 0 && !workspace.versions.some((version) => version.id === parentId)) {
     throw new StoreError('The parent version does not exist', 'bad_parent')
   }
   const version = {
@@ -367,33 +237,18 @@ export function addVersion(recordId, input = {}) {
     error: typeof input.error === 'string' ? input.error.slice(0, 2000) : '',
     meta: input.meta && typeof input.meta === 'object' ? input.meta : {},
   }
-  record.versions.push(version)
-  record.currentVersionId = version.id
-  if (!record.cover && version.images.length > 0) record.cover = version.images[0]
-  writeRecord(record)
-  return { version, record: summariseRecord(record) }
+  workspace.versions.push(version)
+  workspace.currentVersionId = version.id
+  if (!workspace.cover && version.images.length > 0) workspace.cover = version.images[0]
+  writeWorkspace(workspace)
+  return { version }
 }
 
-export function getVersion(recordId, versionId) {
-  const record = getRecord(recordId)
-  const version = record.versions.find((row) => row.id === versionId)
+export function getVersion(versionId) {
+  const workspace = ensureWorkspace()
+  const version = workspace.versions.find((row) => row.id === versionId)
   if (!version) throw new StoreError('No such version', 'not_found')
   return version
-}
-
-/** Walk from a version up to its root. */
-export function ancestry(recordId, versionId) {
-  const record = getRecord(recordId)
-  const byId = new Map(record.versions.map((version) => [version.id, version]))
-  const chain = []
-  let cursor = byId.get(versionId)
-  const seen = new Set()
-  while (cursor && !seen.has(cursor.id)) {
-    seen.add(cursor.id)
-    chain.push(cursor)
-    cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined
-  }
-  return chain.reverse()
 }
 
 /**
@@ -402,41 +257,41 @@ export function ancestry(recordId, versionId) {
  * Children are re-parented onto the removed node's parent, so deleting an
  * intermediate step does not orphan the branches below it.
  */
-export function deleteVersion(recordId, versionId) {
-  const record = getRecord(recordId)
-  const target = record.versions.find((version) => version.id === versionId)
+export function deleteVersion(versionId) {
+  const workspace = ensureWorkspace()
+  const target = workspace.versions.find((version) => version.id === versionId)
   if (!target) throw new StoreError('No such version', 'not_found')
-  record.versions = record.versions.filter((version) => version.id !== versionId)
-  for (const version of record.versions) {
+  workspace.versions = workspace.versions.filter((version) => version.id !== versionId)
+  for (const version of workspace.versions) {
     if (version.parentId === versionId) version.parentId = target.parentId ?? ''
   }
-  if (record.currentVersionId === versionId) {
-    record.currentVersionId = record.versions[record.versions.length - 1]?.id ?? ''
+  if (workspace.currentVersionId === versionId) {
+    workspace.currentVersionId = workspace.versions[workspace.versions.length - 1]?.id ?? ''
   }
-  if (record.cover && target.images.includes(record.cover)) record.cover = ''
-  writeRecord(record)
-  return { record: summariseRecord(record) }
+  if (workspace.cover && target.images.includes(workspace.cover)) workspace.cover = ''
+  writeWorkspace(workspace)
+  return { ok: true }
 }
 
-export function patchVersion(recordId, versionId, patch = {}) {
-  const record = getRecord(recordId)
-  const version = record.versions.find((row) => row.id === versionId)
+export function patchVersion(versionId, patch = {}) {
+  const workspace = ensureWorkspace()
+  const version = workspace.versions.find((row) => row.id === versionId)
   if (!version) throw new StoreError('No such version', 'not_found')
   if (typeof patch.label === 'string') version.label = patch.label.slice(0, 160)
   if (typeof patch.notes === 'string') version.notes = patch.notes.slice(0, 4000)
   if (typeof patch.starred === 'boolean') version.starred = patch.starred
   if (typeof patch.status === 'string') version.status = patch.status === 'failed' ? 'failed' : 'ok'
-  writeRecord(record)
-  return { version, record: summariseRecord(record) }
+  writeWorkspace(workspace)
+  return { version }
 }
 
 // ---------------------------------------------------------------------------
 // conversation
 // ---------------------------------------------------------------------------
 
-/** Append one line to the record's conversation log. */
-export function appendMessage(recordId, message = {}) {
-  const record = getRecord(recordId)
+/** Append one line to the workspace's conversation log. */
+export function appendMessage(message = {}) {
+  const workspace = ensureWorkspace()
   const row = {
     id: newId('m'),
     at: new Date().toISOString(),
@@ -447,16 +302,16 @@ export function appendMessage(recordId, message = {}) {
     images: Array.isArray(message.images) ? message.images.filter((value) => typeof value === 'string').slice(0, 8) : [],
     ok: message.ok !== false,
   }
-  record.conversation.push(row)
-  if (record.conversation.length > 400) record.conversation = record.conversation.slice(-400)
-  writeRecord(record)
+  workspace.conversation.push(row)
+  if (workspace.conversation.length > 400) workspace.conversation = workspace.conversation.slice(-400)
+  writeWorkspace(workspace)
   return row
 }
 
-export function clearConversation(recordId) {
-  const record = getRecord(recordId)
-  record.conversation = []
-  writeRecord(record)
+export function clearConversation() {
+  const workspace = ensureWorkspace()
+  workspace.conversation = []
+  writeWorkspace(workspace)
   return { ok: true }
 }
 

@@ -1,8 +1,8 @@
 {
   "name": "dsh-pixelfly",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
-  "description": "PixelFly for DeepSeek Harness: image generation against an OpenAI-compatible upstream (SenseNova image models), with a settings page for the upstream URL and a rotating multi-key ring, exponential backoff with jitter, and a studio page for generating and browsing images.",
+  "description": "PixelFly for DeepSeek Harness: a single-workspace image studio on top of an OpenAI-compatible upstream, with a rotating multi-key ring, exponential backoff with jitter, a vision-model planner and a version tree of every result.",
   "license": "MIT",
   "author": "Qinqing1999",
   "repository": {
@@ -24,6 +24,7 @@
     "pixelfly",
     "image-generation",
     "text-to-image",
+    "image-editing",
     "sensenova"
   ],
   "exports": {
@@ -37,8 +38,12 @@
     "host/index.js",
     "host/config.js",
     "host/upstream.js",
-    "host/images.js",
-    "host/generate.js",
+    "host/raster.js",
+    "host/vision.js",
+    "host/store.js",
+    "host/providers.js",
+    "host/operations.js",
+    "host/session.js",
     "host/tools.js",
     "client.js",
     "cordis.patch.yml",
