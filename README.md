@@ -21,7 +21,7 @@ hand.
 - **Agent tools** so the model can generate images mid-conversation:
   `pixelfly_generate`, `pixelfly_config`, `pixelfly_status`.
 - **Keys never leave the machine.** They are stored `0600` under the Harness data directory and the
-  UI only ever receives a mask such as `sk-dT6…Jtfn`.
+  UI only ever receives a mask such as `sk-a1b2…z9y8`.
 
 ## Install
 
