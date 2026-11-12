@@ -1,9 +1,9 @@
 // dsh-pixelfly — configuration store.
 //
 // Everything the plugin can be told lives in one JSON file under the Harness data
-// directory, so a settings page, the tools and the studio page all read the same
-// truth. The file is written atomically (temp file + rename) with mode 0600 because
-// it holds API keys.
+// directory, so the settings page, the tools and the studio all read the same
+// truth. The file is written atomically (temp file + rename) with mode 0600
+// because it holds API keys.
 
 import fs from 'node:fs'
 import os from 'node:os'
@@ -17,7 +17,7 @@ export function dataRoot() {
   return override.length > 0 ? path.resolve(override) : DEFAULT_HOME
 }
 
-/** This plugin's private directory (config, state, generated files). */
+/** This plugin's private directory (config, state, history, generated files). */
 export function pluginRoot() {
   return path.join(dataRoot(), 'plugins-data', 'pixelfly')
 }
@@ -30,17 +30,38 @@ export function statePath() {
   return path.join(pluginRoot(), 'state.json')
 }
 
+export function workspaceRoot() {
+  return path.join(pluginRoot(), 'history')
+}
+
 export function imagesRoot() {
   return path.join(pluginRoot(), 'images')
 }
 
+/**
+ * The sizes an upstream is willing to produce.
+ *
+ * A model that edits an existing picture is asked for `size: 'auto'` and answers
+ * on a canvas of its own choosing, so the requested size only matters for
+ * text-to-image and for outpainting.
+ */
+export const SENSENOVA_SIZES = [
+  '1024x1024', '1664x2496', '2496x1664', '1760x2368', '2368x1760',
+  '1824x2272', '2272x1824', '2048x2048', '2752x1536', '1536x2752',
+  '3072x1376', '1344x3136',
+]
+
+export const OPENAI_SIZES = ['1024x1024', '1536x1024', '1024x1536']
+
 export const DEFAULT_CONFIG = {
-  version: 1,
+  version: 2,
   upstream: {
     baseUrl: 'https://token.sensenova.cn/v1',
+    provider: 'sensenova',
     imagesPath: '/images/generations',
     modelsPath: '/models',
     timeoutMs: 180000,
+    visionTimeoutMs: 90000,
   },
   apiKeys: [],
   models: {
@@ -48,6 +69,11 @@ export const DEFAULT_CONFIG = {
     items: [
       { id: 'sensenova-u1.5-fast', label: 'SenseNova U1.5 Fast' },
       { id: 'sensenova-u1.5-lite', label: 'SenseNova U1.5 Lite' },
+    ],
+    visionDefault: 'sensenova-6.8-flash',
+    visionItems: [
+      { id: 'sensenova-6.8-flash', label: 'SenseNova 6.8 Flash' },
+      { id: 'sensenova-6.8-flash-lite', label: 'SenseNova 6.8 Flash Lite' },
     ],
   },
   retry: {
@@ -71,7 +97,13 @@ export const DEFAULT_CONFIG = {
   output: {
     dir: '',
     saveToDisk: true,
-    keepFiles: 200,
+    keepFiles: 400,
+  },
+  limits: {
+    maxBatch: 50,
+    maxUploadBytes: 12582912,
+    maxPromptChars: 12000,
+    visionMaxSide: 768,
   },
 }
 
@@ -130,20 +162,24 @@ export function readConfig() {
   if (!Array.isArray(merged.apiKeys)) merged.apiKeys = []
   merged.apiKeys = merged.apiKeys.filter((entry) => entry && typeof entry === 'object')
   if (!Array.isArray(merged.models?.items) || merged.models.items.length === 0) {
-    merged.models = clone(DEFAULT_CONFIG.models)
+    merged.models.items = clone(DEFAULT_CONFIG.models.items)
+  }
+  if (!Array.isArray(merged.models?.visionItems) || merged.models.visionItems.length === 0) {
+    merged.models.visionItems = clone(DEFAULT_CONFIG.models.visionItems)
   }
   cache = merged
   cacheMtime = stat === null ? 0 : stat.mtimeMs
   return clone(merged)
 }
 
-/** Replace the stored configuration (shallow merge on the file, atomic write). */
+/** Replace the stored configuration (deep merge on the file, atomic write). */
 export function writeConfig(patch) {
   const next = mergeDeep(readConfig(), patch)
-  next.version = 1
+  next.version = DEFAULT_CONFIG.version
   if (!Array.isArray(next.apiKeys)) next.apiKeys = []
   next.apiKeys = next.apiKeys.map((entry, index) => normalizeKeyEntry(entry, index)).filter((entry) => entry !== null)
-  if (!Array.isArray(next.models.items) || next.models.items.length === 0) next.models = clone(DEFAULT_CONFIG.models)
+  if (!Array.isArray(next.models.items) || next.models.items.length === 0) next.models.items = clone(DEFAULT_CONFIG.models.items)
+  if (!Array.isArray(next.models.visionItems) || next.models.visionItems.length === 0) next.models.visionItems = clone(DEFAULT_CONFIG.models.visionItems)
   writeFileAtomic(configPath(), `${JSON.stringify(next, null, 2)}\n`, 0o600)
   cache = null
   cacheMtime = 0
@@ -187,12 +223,21 @@ export function publicConfig(config = readConfig()) {
     hasKey: typeof entry.key === 'string' && entry.key.length > 0,
     length: typeof entry.key === 'string' ? entry.key.length : 0,
   }))
-  out.paths = { root: pluginRoot(), config: configPath(), state: statePath(), images: imagesRoot() }
+  out.paths = { root: pluginRoot(), config: configPath(), state: statePath(), history: workspaceRoot(), images: imagesRoot() }
   out.env = {
     seedKeys: (process.env.PIXELFLY_API_KEYS || '').split(/[\s,]+/).filter(Boolean).length,
     baseUrlOverride: typeof process.env.PIXELFLY_BASE_URL === 'string' ? process.env.PIXELFLY_BASE_URL.trim() : '',
   }
+  out.sizes = sizesFor(config)
   return out
+}
+
+/** The sizes to offer for the configured provider. */
+export function sizesFor(config = readConfig()) {
+  const provider = config.upstream?.provider ?? 'sensenova'
+  if (provider === 'sensenova') return [...SENSENOVA_SIZES]
+  if (provider === 'gemini') return ['1024x1024', '1344x768', '768x1344', '1152x896', '896x1152']
+  return [...OPENAI_SIZES]
 }
 
 /** Every enabled key, in configured order. Falls back to the environment seed. */
@@ -232,3 +277,5 @@ export function readState() {
 export function ensureImagesRoot() {
   return ensureDir(imagesRoot())
 }
+
+export { ensureDir, writeFileAtomic }

@@ -57,5 +57,8 @@
       "platform": "web",
       "immediately": true
     }
+  },
+  "dependencies": {
+    "sharp": "^0.35.5"
   }
 }

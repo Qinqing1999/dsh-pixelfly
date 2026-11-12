@@ -1,12 +1,22 @@
 // dsh-pixelfly — upstream client.
 //
-// One job: take a generation request, try it against the configured upstream with
-// every usable API key in rotation, and back off between attempts. Nothing here
-// knows about DSH; the Host half and the HTTP routes both call into it.
+// One job: take a JSON request, try it against the configured upstream with every
+// usable API key in rotation, and back off between attempts. Nothing here knows
+// about DSH; the Host half, the HTTP routes and the vision layer all call in.
+//
+// The rotation rule is worth stating because it is easy to get wrong: a key that
+// answers 401/402/403 is not evidence that the *request* is bad, only that this
+// key is. So a rejected key is swapped for the next one without sleeping — there
+// is nothing to wait for — and the attempt budget is widened to cover at least one
+// pass over the ring. A 429 or a 5xx, by contrast, means "ask again later", which
+// is where the exponential backoff applies.
 
 import { activeKeys, baseUrl, readConfig } from './config.js'
 
-const RETRYABLE_NETWORK_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED', 'EAI_AGAIN', 'ENOTFOUND', 'EPIPE', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT'])
+const RETRYABLE_NETWORK_CODES = new Set([
+  'ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED', 'EAI_AGAIN', 'ENOTFOUND', 'EPIPE',
+  'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT',
+])
 
 /** Error carrying the HTTP status and the upstream's own message. */
 export class UpstreamError extends Error {
@@ -20,6 +30,7 @@ export class UpstreamError extends Error {
     this.keyId = options.keyId
     this.body = options.body
     this.attempts = options.attempts ?? 1
+    this.trace = options.trace
   }
 }
 
@@ -37,6 +48,7 @@ export class KeyPool {
     this.rotate = options.rotate !== false
     this.cooldownMs = options.cooldownMs ?? 60000
     this.attempts = new Map()
+    this.successes = new Map()
   }
 
   get size() {
@@ -64,6 +76,7 @@ export class KeyPool {
   markSuccess(entry) {
     if (!entry) return
     this.cooldowns.delete(entry.id)
+    this.successes.set(entry.id, (this.successes.get(entry.id) ?? 0) + 1)
   }
 
   markFailure(entry, error, now = Date.now()) {
@@ -82,6 +95,7 @@ export class KeyPool {
       cooling: (this.cooldowns.get(entry.id) ?? 0) > now,
       cooldownUntil: this.cooldowns.get(entry.id) ?? 0,
       attempts: this.attempts.get(entry.id) ?? 0,
+      successes: this.successes.get(entry.id) ?? 0,
     }))
   }
 }
@@ -119,12 +133,12 @@ function sleep(ms, signal) {
     }, ms)
     const onAbort = () => {
       clearTimeout(timer)
-      reject(new UpstreamError('generation cancelled', { code: 'aborted' }))
+      reject(new UpstreamError('cancelled', { code: 'aborted' }))
     }
     if (signal) {
       if (signal.aborted) {
         clearTimeout(timer)
-        reject(new UpstreamError('generation cancelled', { code: 'aborted' }))
+        reject(new UpstreamError('cancelled', { code: 'aborted' }))
         return
       }
       signal.addEventListener('abort', onAbort, { once: true })
@@ -132,10 +146,17 @@ function sleep(ms, signal) {
   })
 }
 
-function friendlyMessage(raw, status) {
+/**
+ * Turn an upstream's terse English string into something a user can act on.
+ *
+ * The raw text is kept on the error body, so nothing is lost for debugging; this
+ * only decides what to show.
+ */
+export function friendlyMessage(raw, status) {
   const text = typeof raw === 'string' ? raw : ''
-  if (/sensitive|content.?review|inappropriate|blocked/i.test(text)) return 'The upstream content filter rejected this prompt. Rephrase it and try again.'
-  if (/rps|rate.?limit|too many requests|429/i.test(text) || status === 429) return 'The upstream rate limit was reached. Pixelfly backed off; try again shortly.'
+  if (/sensitive|content.?review|inappropriate|blocked/i.test(text)) return 'The upstream content filter rejected this request. Change the image or prompt and try again.'
+  if (/image should be|image.*not.*support|invalid.*image/i.test(text)) return `The upstream rejected the input image. Upstream said: ${text.slice(0, 300)}`
+  if (/rps|rate.?limit|too many requests|tpm|rpm/i.test(text) || status === 429) return 'The upstream rate limit was reached. PixelFly backed off; try again shortly.'
   if (/quota|insufficient|balance|arrears/i.test(text) || status === 402) return 'The upstream account is out of quota or unpaid.'
   if (/unauthorized|invalid.*(api.?key|token)|authentication/i.test(text) || status === 401) return 'The upstream rejected the API key.'
   if (status === 404) return 'The upstream has no such endpoint or model. Check the base URL and model id.'
@@ -160,16 +181,13 @@ async function readErrorBody(response) {
   }
 }
 
-/**
- * Issue one POST against the upstream, mapping transport and HTTP failures onto
- * UpstreamError with an explicit `retryable` flag.
- */
-async function postJson(url, body, apiKey, options) {
+/** One HTTP attempt with one key; maps transport and HTTP failures onto UpstreamError. */
+async function postOnce(url, body, apiKey, options) {
   const { timeoutMs, signal } = options
   const controller = new AbortController()
   const onAbort = () => controller.abort()
   if (signal) {
-    if (signal.aborted) throw new UpstreamError('generation cancelled', { code: 'aborted' })
+    if (signal.aborted) throw new UpstreamError('cancelled', { code: 'aborted' })
     signal.addEventListener('abort', onAbort, { once: true })
   }
   const timer = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs))
@@ -186,12 +204,18 @@ async function postJson(url, body, apiKey, options) {
       signal: controller.signal,
     })
   } catch (error) {
-    if (signal?.aborted) throw new UpstreamError('generation cancelled', { code: 'aborted' })
+    if (signal?.aborted) throw new UpstreamError('cancelled', { code: 'aborted' })
     const code = error?.cause?.code ?? error?.code ?? ''
     const timedOut = error?.name === 'AbortError'
     throw new UpstreamError(
-      timedOut ? `The upstream did not answer within ${Math.round(timeoutMs / 1000)}s.` : `Network error contacting the upstream${code ? ` (${code})` : ''}.`,
-      { code: timedOut ? 'timeout' : 'network', retryable: timedOut || RETRYABLE_NETWORK_CODES.has(code) || code === '', status: 0 },
+      timedOut
+        ? `The upstream did not answer within ${Math.round(timeoutMs / 1000)}s.`
+        : `Network error contacting the upstream${code ? ` (${code})` : ''}.`,
+      {
+        code: timedOut ? 'timeout' : 'network',
+        retryable: timedOut || RETRYABLE_NETWORK_CODES.has(code) || code === '',
+        status: 0,
+      },
     )
   } finally {
     clearTimeout(timer)
@@ -218,54 +242,62 @@ async function postJson(url, body, apiKey, options) {
 }
 
 /**
- * Run one upstream call with key rotation and exponential backoff.
+ * POST a JSON body with key rotation and backoff.
  *
- * @param pathname - upstream path such as `/images/generations`.
+ * @param url - absolute upstream URL.
  * @param body - JSON body.
- * @param options - `{ config, signal, onAttempt, label }`.
+ * @param options - `{ config, signal, onAttempt, pool, label }`.
+ * @returns `{ payload, attempt, keyId, trace, pool }`.
  */
-export async function callUpstream(pathname, body, options = {}) {
+export async function postJson(url, body, options = {}) {
   const config = options.config ?? readConfig()
   const retry = config.retry ?? {}
   const keys = activeKeys(config)
   if (keys.length === 0) {
-    throw new UpstreamError('No API key is configured. Add one on the Pixelfly settings page.', { code: 'no_key' })
+    throw new UpstreamError('No API key is configured. Add one on the PixelFly settings page.', { code: 'no_key' })
   }
   const pool = options.pool ?? new KeyPool(keys, { rotate: retry.rotateKeys !== false, cooldownMs: retry.cooldownMs ?? 60000 })
-  // A rejected key is a reason to try the NEXT key, not to give up: with a ring of keys the
-  // attempt budget must cover at least one pass over the ring. Backoff sleeps are charged to
-  // the retry budget, key rotation is not (there is nothing to wait for on a 401).
   const configured = Math.max(1, Math.min(12, Math.round(retry.maxAttempts ?? 4)))
   const rotateBudget = retry.rotateKeys === false ? 1 : Math.min(pool.size, 8)
   const maxAttempts = Math.max(configured, rotateBudget)
-  const url = `${baseUrl(config)}${pathname}`
   const retryOn = Array.isArray(retry.retryOn) && retry.retryOn.length > 0 ? retry.retryOn : [408, 425, 429, 500, 502, 503, 504]
   const trace = []
   let lastError = null
   let backoffs = 0
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    if (options.signal?.aborted) throw new UpstreamError('generation cancelled', { code: 'aborted' })
+    if (options.signal?.aborted) throw new UpstreamError('cancelled', { code: 'aborted' })
     const entry = pool.next()
     if (!entry) throw new UpstreamError('No API key is configured.', { code: 'no_key' })
     pool.attempts.set(entry.id, (pool.attempts.get(entry.id) ?? 0) + 1)
     const startedAt = Date.now()
     try {
-      const payload = await postJson(url, body, entry.key, {
+      const payload = await postOnce(url, body, entry.key, {
         timeoutMs: config.upstream?.timeoutMs ?? 180000,
         signal: options.signal,
         retryOn,
       })
       pool.markSuccess(entry)
-      trace.push({ attempt, keyId: entry.id, status: 200, ms: Date.now() - startedAt })
-      options.onAttempt?.({ attempt, keyId: entry.id, status: 200, ms: Date.now() - startedAt, trace })
+      const row = { attempt, keyId: entry.id, status: 200, ms: Date.now() - startedAt }
+      trace.push(row)
+      options.onAttempt?.({ ...row, trace })
       return { payload, attempt, keyId: entry.id, trace, pool }
     } catch (error) {
-      const failure = error instanceof UpstreamError ? error : new UpstreamError(String(error?.message ?? error), { code: 'unknown', retryable: false })
+      const failure = error instanceof UpstreamError
+        ? error
+        : new UpstreamError(String(error?.message ?? error), { code: 'unknown', retryable: false })
       lastError = failure
       pool.markFailure(entry, failure)
-      trace.push({ attempt, keyId: entry.id, status: failure.status, code: failure.code, ms: Date.now() - startedAt, message: failure.message })
-      options.onAttempt?.({ attempt, keyId: entry.id, status: failure.status, code: failure.code, ms: Date.now() - startedAt, message: failure.message, trace })
+      const row = {
+        attempt,
+        keyId: entry.id,
+        status: failure.status,
+        code: failure.code,
+        ms: Date.now() - startedAt,
+        message: failure.message,
+      }
+      trace.push(row)
+      options.onAttempt?.({ ...row, trace })
       if (failure.code === 'aborted') throw failure
       const keyScoped = failure.status === 401 || failure.status === 402 || failure.status === 403
       // The failed key is already cooling, so `hasUsable()` now means "another key may work".
@@ -276,8 +308,6 @@ export async function callUpstream(pathname, body, options = {}) {
         failure.trace = trace
         throw failure
       }
-      // A 429/5xx waits; a pure key rotation does not, because the next key is a fresh
-      // budget rather than the same one being asked again.
       if (!canRotate) {
         backoffs += 1
         await sleep(backoffDelay(backoffs, retry, failure.retryAfterMs), options.signal)
@@ -289,6 +319,12 @@ export async function callUpstream(pathname, body, options = {}) {
   final.attempts = maxAttempts
   final.trace = trace
   throw final
+}
+
+/** POST a body to a path under the configured base URL. */
+export async function callUpstream(pathname, body, options = {}) {
+  const config = options.config ?? readConfig()
+  return postJson(`${baseUrl(config)}${pathname}`, body, { ...options, config })
 }
 
 /** List the upstream's models with one key, for the settings page probe. */
@@ -310,8 +346,10 @@ export async function listModels(options = {}) {
     const rows = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.models) ? payload.models : []
     return rows.map((row) => ({
       id: row?.id ?? row?.model ?? '',
-      outputModalities: row?.output_modalities ?? row?.outputModalities ?? [],
+      label: row?.name ?? row?.id ?? row?.model ?? '',
       inputModalities: row?.input_modalities ?? row?.inputModalities ?? [],
+      outputModalities: row?.output_modalities ?? row?.outputModalities ?? [],
+      description: typeof row?.description === 'string' ? row.description.slice(0, 400) : '',
     })).filter((row) => row.id.length > 0)
   } finally {
     clearTimeout(timer)

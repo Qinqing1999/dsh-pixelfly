@@ -1,31 +1,66 @@
 // dsh-pixelfly — Host half.
 //
-// Registers the three model-facing tools, plus the HTTP routes the settings page and
-// the studio page talk to. Named Web routes carry no server-wide auth, so every route
-// below sits behind a Host/Origin fence, DSH's own connection admission for browser
+// Registers the model-facing tools plus the HTTP routes the settings page and the
+// workspace talk to. Named Web routes carry no server-wide auth, so every route below
+// sits behind a Host/Origin fence, DSH's own connection admission for browser
 // requests, and a per-process Bearer token the page bootstraps from a token route.
 
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { activeKeys, baseUrl, imagesRoot, maskKey, outputDir, pluginRoot, publicConfig, readConfig, readState, writeConfig } from './config.js'
+import {
+  activeKeys,
+  baseUrl,
+  imagesRoot,
+  maskKey,
+  outputDir,
+  pluginRoot,
+  workspaceRoot,
+  publicConfig,
+  readConfig,
+  readState,
+  sizesFor,
+  writeConfig,
+} from './config.js'
 import { createTools } from './tools.js'
-import { generateImages } from './generate.js'
 import { KeyPool, listModels, UpstreamError } from './upstream.js'
-import { listGenerated, readGeneratedFile } from './images.js'
+import { decodeUpload, execute, publicWorkspace } from './session.js'
+import {
+  ASSET_KIND_LIST,
+  COLOUR_MODE_LIST,
+  ELEMENT_PRESET_LIST,
+  FUSION_MODE_LIST,
+  OperationError,
+  expandVariables,
+  operationCatalog,
+  recogniseText,
+} from './operations.js'
+import {
+  addLibraryPrompt,
+  addVersion,
+  ancestry,
+  appendMessage,
+  clearConversation,
+  collectGarbage,
+  deleteVersion,
+  getVersion,
+  getWorkspace,
+  patchVersion,
+  resetWorkspace,
+  readAsset,
+  readLibrary,
+  removeLibraryPrompt,
+  saveAsset,
+  updateRecord,
+} from './store.js'
+import { probe } from './raster.js'
+import { createZip } from './zip.js'
 
 export const inject = ['tools']
 
 const ROUTE_BASE = '/pixelfly/api'
 const TOKEN_ROUTE = `${ROUTE_BASE}/token`
-const CONFIG_ROUTE = `${ROUTE_BASE}/config`
-const TEST_ROUTE = `${ROUTE_BASE}/test`
-const MODELS_ROUTE = `${ROUTE_BASE}/models`
-const GENERATE_ROUTE = `${ROUTE_BASE}/generate`
-const GALLERY_ROUTE = `${ROUTE_BASE}/gallery`
-const FILE_ROUTE = `${ROUTE_BASE}/file`
-const STATS_ROUTE = `${ROUTE_BASE}/stats`
 
 const TOKEN_MIN_LENGTH = 32
 const TOKEN_FILE = 'http.token'
@@ -78,9 +113,9 @@ function createHttpAuth(ctx, policy) {
   }
 }
 
-// The fence is loopback-only by default. A Harness deliberately served on a LAN address
-// (or behind a tunnel) must widen it explicitly, exactly as the Web UI's own trusted-host
-// list does: `allowNonLoopback: true` plus the `trustedHosts` entries it will be reached by.
+// The fence is loopback-only by default. A Harness deliberately served on a LAN
+// address has to widen it explicitly: `allowNonLoopback: true` plus the
+// `trustedHosts` entries it is actually reached by.
 function makePolicy(config) {
   const raw = config && typeof config === 'object' ? config : {}
   const trustedHosts = new Set()
@@ -110,10 +145,8 @@ function originAllowed(req, policy) {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false
   const authority = authorityOf(headerOf(req.headers, 'host'))
   if (!authority) return false
-  // Same-origin is always fine; a cross-origin caller must at least still be a host the
-  // fence admits, which keeps a page on a trusted host from being a stepping stone.
   if (parsed.host.toLowerCase() === authority.host.toLowerCase()) return true
-  if (isLoopbackHostname(parsed.hostname)) return policy.allowNonLoopback === false ? false : true
+  if (isLoopbackHostname(parsed.hostname)) return true
   return policy.allowNonLoopback && policy.trustedHosts.has(parsed.host.toLowerCase())
 }
 
@@ -146,7 +179,17 @@ function sendJson(res, status, payload) {
   res.end(JSON.stringify(payload))
 }
 
-async function rejectRequest(req, auth, options = {}) {
+function sendBinary(res, status, mediaType, bytes, options = {}) {
+  res.statusCode = status
+  res.setHeader('content-type', mediaType)
+  res.setHeader('content-length', String(bytes.length))
+  res.setHeader('cache-control', options.cacheControl ?? 'private, max-age=300')
+  res.setHeader('x-content-type-options', 'nosniff')
+  if (typeof options.disposition === 'string') res.setHeader('content-disposition', options.disposition)
+  res.end(bytes)
+}
+
+function rejectRequest(req, auth, options = {}) {
   const requireToken = options.requireToken !== false
   if (!hostAllowed(req, auth.policy)) return 403
   if (!originAllowed(req, auth.policy)) return 403
@@ -162,28 +205,34 @@ async function rejectRequest(req, auth, options = {}) {
 
 function guarded(handler, auth, options = {}) {
   return async (req, res) => {
-    const rejection = await rejectRequest(req, auth, options)
+    const rejection = rejectRequest(req, auth, options)
     if (rejection !== undefined) {
       sendJson(res, rejection, {
         ok: false,
         error: rejection === 401 ? 'unauthorized' : 'forbidden',
-        hint: rejection === 401 && options.requireToken !== false ? 'send Authorization: Bearer <token> from GET /pixelfly/api/token' : undefined,
+        hint: rejection === 401 && options.requireToken !== false
+          ? 'send Authorization: Bearer <token> from GET /pixelfly/api/token'
+          : undefined,
       })
       return
     }
     try {
       await handler(req, res)
     } catch (error) {
-      if (!res.headersSent) {
-        sendJson(res, error instanceof UpstreamError && error.status >= 400 ? error.status : 500, {
-          ok: false,
-          error: error?.message ?? String(error),
-          code: error?.code,
-          status: error?.status,
-        })
-      } else {
+      if (res.headersSent) {
         try { res.end() } catch { /* already gone */ }
+        return
       }
+      const status = Number.isFinite(error?.status) && error.status >= 400 && error.status < 600
+        ? error.status
+        : error instanceof OperationError ? 400 : 500
+      sendJson(res, status, {
+        ok: false,
+        error: error?.message ?? String(error),
+        code: error?.code,
+        trace: error?.trace,
+        attempts: error?.attempts,
+      })
     }
   }
 }
@@ -204,7 +253,11 @@ async function readJsonBody(req, limitBytes = 2 * 1024 * 1024) {
   }
 }
 
-// --- routes ------------------------------------------------------------------------------------
+function searchOf(req) {
+  return new URL(req.url ?? '/', 'http://localhost').searchParams
+}
+
+// --- settings routes ---------------------------------------------------------------------------
 
 function tokenRoute(auth) {
   return guarded(async (req, res) => {
@@ -225,10 +278,17 @@ function configRoute(auth) {
           baseUrl: baseUrl(config),
           outputDir: outputDir(config),
           imageRoot: imagesRoot(),
+          workspaceRoot: workspaceRoot(),
           keyCount: activeKeys(config).length,
         },
+        operations: operationCatalog(),
+        presets: {
+          element: ELEMENT_PRESET_LIST,
+          asset: ASSET_KIND_LIST,
+          colour: COLOUR_MODE_LIST,
+          fusion: FUSION_MODE_LIST,
+        },
         stats: state.lastRun ?? null,
-        history: Array.isArray(state.history) ? state.history.slice(0, 10) : [],
       })
       return
     }
@@ -238,10 +298,20 @@ function configRoute(auth) {
     if (body.upstream && typeof body.upstream === 'object') {
       const upstream = {}
       if (typeof body.upstream.baseUrl === 'string') {
-        if (!/^https?:\/\//i.test(body.upstream.baseUrl.trim())) return sendJson(res, 400, { ok: false, error: 'baseUrl must be an http(s) URL' })
+        if (!/^https?:\/\//i.test(body.upstream.baseUrl.trim())) {
+          return sendJson(res, 400, { ok: false, error: 'baseUrl must be an http(s) URL' })
+        }
         upstream.baseUrl = body.upstream.baseUrl.trim()
       }
-      if (Number.isFinite(Number(body.upstream.timeoutMs))) upstream.timeoutMs = Math.max(5000, Math.min(600000, Math.round(Number(body.upstream.timeoutMs))))
+      if (typeof body.upstream.provider === 'string' && ['sensenova', 'openai', 'gemini'].includes(body.upstream.provider)) {
+        upstream.provider = body.upstream.provider
+      }
+      if (Number.isFinite(Number(body.upstream.timeoutMs))) {
+        upstream.timeoutMs = Math.max(5000, Math.min(600000, Math.round(Number(body.upstream.timeoutMs))))
+      }
+      if (Number.isFinite(Number(body.upstream.visionTimeoutMs))) {
+        upstream.visionTimeoutMs = Math.max(5000, Math.min(600000, Math.round(Number(body.upstream.visionTimeoutMs))))
+      }
       if (Object.keys(upstream).length > 0) patch.upstream = upstream
     }
     if (body.retry && typeof body.retry === 'object') {
@@ -262,6 +332,12 @@ function configRoute(auth) {
           .filter((row) => row && typeof row.id === 'string' && row.id.trim().length > 0)
           .map((row) => ({ id: row.id.trim(), label: typeof row.label === 'string' && row.label.trim().length > 0 ? row.label.trim() : row.id.trim() }))
       }
+      if (typeof body.models.visionDefault === 'string' && body.models.visionDefault.trim().length > 0) models.visionDefault = body.models.visionDefault.trim()
+      if (Array.isArray(body.models.visionItems)) {
+        models.visionItems = body.models.visionItems
+          .filter((row) => row && typeof row.id === 'string' && row.id.trim().length > 0)
+          .map((row) => ({ id: row.id.trim(), label: typeof row.label === 'string' && row.label.trim().length > 0 ? row.label.trim() : row.id.trim() }))
+      }
       if (Object.keys(models).length > 0) patch.models = models
     }
     if (body.request && typeof body.request === 'object') {
@@ -279,13 +355,23 @@ function configRoute(auth) {
       if (Number.isFinite(Number(body.output.keepFiles))) output.keepFiles = Math.max(0, Math.min(10000, Math.round(Number(body.output.keepFiles))))
       if (Object.keys(output).length > 0) patch.output = output
     }
+    if (body.limits && typeof body.limits === 'object') {
+      const limits = {}
+      if (Number.isFinite(Number(body.limits.maxBatch))) limits.maxBatch = Math.max(2, Math.min(50, Math.round(Number(body.limits.maxBatch))))
+      if (Number.isFinite(Number(body.limits.visionMaxSide))) limits.visionMaxSide = Math.max(256, Math.min(1536, Math.round(Number(body.limits.visionMaxSide))))
+      if (Object.keys(limits).length > 0) patch.limits = limits
+    }
     const next = writeConfig(patch)
-    sendJson(res, 200, { ok: true, config: publicConfig(next), resolved: { baseUrl: baseUrl(next), outputDir: outputDir(next) } })
+    sendJson(res, 200, {
+      ok: true,
+      config: publicConfig(next),
+      resolved: { baseUrl: baseUrl(next), outputDir: outputDir(next), sizes: sizesFor(next) },
+    })
   }, auth)
 }
 
 function keysRoute(auth) {
-  // Keys live at their own endpoint so an add/remove never races a whole-config write.
+  // Keys live at their own endpoint so an add or remove never races a whole-config write.
   return guarded(async (req, res) => {
     const config = readConfig()
     if (req.method === 'GET') {
@@ -300,8 +386,8 @@ function keysRoute(auth) {
         if (key.length < 8) return sendJson(res, 400, { ok: false, error: 'a key of at least 8 characters is required' })
         if (config.apiKeys.some((entry) => entry.key === key)) return sendJson(res, 409, { ok: false, error: 'that key is already configured' })
         const id = `key-${Date.now().toString(36)}-${randomBytes(2).toString('hex')}`
-        const next = [...config.apiKeys, { id, label: typeof body.label === 'string' && body.label.trim() ? body.label.trim() : `Key ${config.apiKeys.length + 1}`, enabled: true, weight: 1, key }]
-        writeConfig({ apiKeys: next })
+        const label = typeof body.label === 'string' && body.label.trim() ? body.label.trim() : `Key ${config.apiKeys.length + 1}`
+        writeConfig({ apiKeys: [...config.apiKeys, { id, label, enabled: true, weight: 1, key }] })
         sendJson(res, 200, { ok: true, keys: publicConfig(readConfig()).apiKeys, added: maskKey(key) })
         return
       }
@@ -313,7 +399,13 @@ function keysRoute(auth) {
           const key = typeof candidate === 'string' ? candidate.trim() : ''
           if (key.length < 8 || existing.has(key)) continue
           existing.add(key)
-          added.push({ id: `key-${Date.now().toString(36)}-${randomBytes(2).toString('hex')}`, label: `Key ${config.apiKeys.length + added.length + 1}`, enabled: true, weight: 1, key })
+          added.push({
+            id: `key-${Date.now().toString(36)}-${randomBytes(2).toString('hex')}`,
+            label: `Key ${config.apiKeys.length + added.length + 1}`,
+            enabled: true,
+            weight: 1,
+            key,
+          })
         }
         writeConfig({ apiKeys: [...config.apiKeys, ...added] })
         sendJson(res, 200, { ok: true, keys: publicConfig(readConfig()).apiKeys, addedCount: added.length })
@@ -335,6 +427,14 @@ function keysRoute(auth) {
         sendJson(res, 200, { ok: true, keys: publicConfig(readConfig()).apiKeys })
         return
       }
+      if (action === 'label') {
+        const id = typeof body.id === 'string' ? body.id : ''
+        const label = typeof body.label === 'string' ? body.label.trim().slice(0, 80) : ''
+        if (label.length === 0) return sendJson(res, 400, { ok: false, error: 'a label is required' })
+        writeConfig({ apiKeys: config.apiKeys.map((entry) => (entry.id === id ? { ...entry, label } : entry)) })
+        sendJson(res, 200, { ok: true, keys: publicConfig(readConfig()).apiKeys })
+        return
+      }
       if (action === 'clear') {
         writeConfig({ apiKeys: [] })
         sendJson(res, 200, { ok: true, keys: [] })
@@ -348,19 +448,6 @@ function keysRoute(auth) {
       return
     }
     sendJson(res, 405, { ok: false, error: 'GET, POST or DELETE only' })
-  }, auth)
-}
-
-function modelsRoute(auth) {
-  return guarded(async (req, res) => {
-    if (req.method !== 'GET' && req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'GET or POST only' })
-    const config = readConfig()
-    try {
-      const models = await listModels({ config })
-      sendJson(res, 200, { ok: true, models, baseUrl: baseUrl(config) })
-    } catch (error) {
-      sendJson(res, 200, { ok: false, error: error.message, code: error.code, status: error.status, baseUrl: baseUrl(config) })
-    }
   }, auth)
 }
 
@@ -398,54 +485,223 @@ function testRoute(auth) {
   }, auth)
 }
 
-function generateRoute(auth) {
+function modelsRoute(auth) {
+  return guarded(async (req, res) => {
+    if (req.method !== 'GET' && req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'GET or POST only' })
+    const config = readConfig()
+    try {
+      const models = await listModels({ config })
+      const imageModels = models.filter((row) => Array.isArray(row.outputModalities) && row.outputModalities.includes('image'))
+      const visionModels = models.filter((row) => Array.isArray(row.inputModalities) && row.inputModalities.includes('image'))
+      sendJson(res, 200, {
+        ok: true,
+        models,
+        imageModels,
+        visionModels,
+        sizes: sizesFor(config),
+        baseUrl: baseUrl(config),
+      })
+    } catch (error) {
+      sendJson(res, 200, { ok: false, error: error.message, code: error.code, status: error.status, baseUrl: baseUrl(config) })
+    }
+  }, auth)
+}
+
+// --- workspace ---------------------------------------------------------------------------------
+
+function workspaceRoute(auth) {
+  return guarded(async (req, res) => {
+    const config = readConfig()
+    if (req.method === 'GET') {
+      sendJson(res, 200, {
+        ok: true,
+        workspace: publicWorkspace(getWorkspace()),
+        sizes: sizesFor(config),
+        models: config.models,
+      })
+      return
+    }
+    if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'GET or POST only' })
+    const body = await readJsonBody(req, 32 * 1024 * 1024)
+    const action = body.action ?? 'update'
+    const workspace = getWorkspace()
+    if (action === 'update') {
+      const patch = body.patch ?? body
+      const clean = {}
+      if (typeof patch.stylePrompt === 'string') clean.stylePrompt = patch.stylePrompt
+      if (patch.models && typeof patch.models === 'object') {
+        clean.models = {
+          image: typeof patch.models.image === 'string' ? patch.models.image : workspace.models?.image ?? '',
+          vision: typeof patch.models.vision === 'string' ? patch.models.vision : workspace.models?.vision ?? '',
+        }
+      }
+      if (typeof patch.currentVersionId === 'string') clean.currentVersionId = patch.currentVersionId
+      updateRecord(workspace.id, clean)
+      sendJson(res, 200, { ok: true, workspace: publicWorkspace(getWorkspace()) })
+      return
+    }
+    if (action === 'deleteVersion') {
+      deleteVersion(workspace.id, String(body.versionId ?? ''))
+      sendJson(res, 200, { ok: true, workspace: publicWorkspace(getWorkspace()) })
+      return
+    }
+    if (action === 'patchVersion') {
+      patchVersion(workspace.id, String(body.versionId ?? ''), body.patch ?? {})
+      sendJson(res, 200, { ok: true, workspace: publicWorkspace(getWorkspace()) })
+      return
+    }
+    if (action === 'clearConversation') {
+      clearConversation(workspace.id)
+      sendJson(res, 200, { ok: true, workspace: publicWorkspace(getWorkspace()) })
+      return
+    }
+    if (action === 'message') {
+      appendMessage(workspace.id, { role: 'user', kind: 'note', text: String(body.text ?? '') })
+      sendJson(res, 200, { ok: true, workspace: publicWorkspace(getWorkspace()) })
+      return
+    }
+    if (action === 'reset') {
+      resetWorkspace()
+      sendJson(res, 200, { ok: true, workspace: publicWorkspace(getWorkspace()) })
+      return
+    }
+    if (action === 'gc') {
+      sendJson(res, 200, { ok: true, ...collectGarbage(), workspace: publicWorkspace(getWorkspace()) })
+      return
+    }
+    sendJson(res, 400, { ok: false, error: `unknown action ${action}` })
+  }, auth)
+}
+
+// --- operations --------------------------------------------------------------------------------
+
+function operationsRoute(auth) {
+  return guarded(async (req, res) => {
+    if (req.method === 'GET') {
+      sendJson(res, 200, {
+        ok: true,
+        operations: operationCatalog(),
+        presets: {
+          element: ELEMENT_PRESET_LIST,
+          asset: ASSET_KIND_LIST,
+          colour: COLOUR_MODE_LIST,
+          fusion: FUSION_MODE_LIST,
+        },
+      })
+      return
+    }
+    if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'GET or POST only' })
+    const body = await readJsonBody(req, 64 * 1024 * 1024)
+    const op = String(body.op ?? 'text2image')
+    const result = await execute(op, body, {
+      baseVersionId: body.baseVersionId,
+      config: readConfig(),
+    })
+    sendJson(res, 200, result)
+  }, auth)
+}
+
+function previewRoute(auth) {
+  // A dry run: expand variables or count a prompt list without spending a request.
   return guarded(async (req, res) => {
     if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'POST only' })
-    const body = await readJsonBody(req, 8 * 1024 * 1024)
-    const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
-    if (prompt.length === 0) return sendJson(res, 400, { ok: false, error: 'prompt is required' })
-    const result = await generateImages(
-      { prompt, model: body.model, size: body.size, n: body.n, watermark: body.watermark, promptExtend: body.promptExtend, images: body.images },
-      {},
-    )
-    sendJson(res, 200, {
-      ok: true,
-      model: result.model,
-      prompt: result.prompt,
-      size: result.size,
-      n: result.n,
-      attempts: result.attempts,
-      keyId: result.keyId,
-      elapsedMs: result.elapsedMs,
-      trace: result.trace,
-      usage: result.usage,
-      images: result.images.map(({ data: _data, ...rest }) => rest),
+    const body = await readJsonBody(req, 4 * 1024 * 1024)
+    const config = readConfig()
+    if (body.op === 'batchVariables') {
+      const expanded = expandVariables(String(body.prompt ?? ''), body.values ?? {}, config.limits?.maxBatch ?? 50)
+      sendJson(res, 200, {
+        ok: true,
+        names: expanded.names,
+        count: expanded.prompts.length,
+        prompts: expanded.prompts,
+        truncated: expanded.truncated,
+      })
+      return
+    }
+    if (body.op === 'batchList') {
+      const lines = (Array.isArray(body.prompts) ? body.prompts : String(body.prompts ?? '').split(/\r?\n/))
+        .map((row) => String(row ?? '').trim())
+        .filter((row) => row.length > 0)
+      sendJson(res, 200, { ok: true, count: lines.length, prompts: lines.slice(0, 200) })
+      return
+    }
+    sendJson(res, 400, { ok: false, error: 'nothing to preview for that operation' })
+  }, auth)
+}
+
+function recogniseRoute(auth) {
+  return guarded(async (req, res) => {
+    if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'POST only' })
+    const body = await readJsonBody(req, 32 * 1024 * 1024)
+    const config = readConfig()
+    const workspace = getWorkspace()
+    let source = typeof body.image === 'string' && body.image.length > 0 ? decodeUpload(body.image, config) : null
+    if (source === null) {
+      const version = getVersion(workspace.id, body.versionId ?? workspace.currentVersionId)
+      const assetId = version.images?.[0]
+      if (assetId) source = { buffer: readAsset(assetId), mediaType: 'image/png' }
+    }
+    if (source === null) return sendJson(res, 400, { ok: false, error: 'there is no picture to read yet' })
+    const result = await recogniseText({ source, visionModel: body.visionModel }, {
+      config,
+      model: config.models?.default,
+      visionModel: body.visionModel ?? workspace.models?.vision ?? config.models?.visionDefault,
+    })
+    sendJson(res, 200, { ok: true, ...result })
+  }, auth)
+}
+
+// --- assets ------------------------------------------------------------------------------------
+
+function assetRoute(auth) {
+  return guarded(async (req, res) => {
+    if (req.method !== 'GET') return sendJson(res, 405, { ok: false, error: 'GET only' })
+    const bytes = readAsset(searchOf(req).get('id') ?? '')
+    const info = await probe(bytes).catch(() => null)
+    const mediaType = info?.format === 'jpeg' ? 'image/jpeg' : info?.format === 'webp' ? 'image/webp' : 'image/png'
+    sendBinary(res, 200, mediaType, bytes)
+  }, auth)
+}
+
+function versionZipRoute(auth) {
+  return guarded(async (req, res) => {
+    if (req.method !== 'GET') return sendJson(res, 405, { ok: false, error: 'GET only' })
+    const params = searchOf(req)
+    const workspace = getWorkspace()
+    const version = getVersion(workspace.id, params.get('versionId') ?? workspace.currentVersionId)
+    const entries = []
+    for (let index = 0; index < (version.images ?? []).length; index += 1) {
+      entries.push({ name: `pixelfly-${version.id}-${index + 1}.png`, data: readAsset(version.images[index]) })
+    }
+    if (entries.length === 0) return sendJson(res, 404, { ok: false, error: 'that version has no images' })
+    const zip = createZip(entries)
+    sendBinary(res, 200, 'application/zip', zip, {
+      disposition: `attachment; filename="pixelfly-${version.id}.zip"`,
+      cacheControl: 'no-store',
     })
   }, auth)
 }
 
-function galleryRoute(auth) {
-  return guarded(async (req, res) => {
-    if (req.method !== 'GET') return sendJson(res, 405, { ok: false, error: 'GET only' })
-    const url = new URL(req.url ?? '/', 'http://localhost')
-    const limit = Math.max(1, Math.min(120, Number(url.searchParams.get('limit') ?? 24) || 24))
-    sendJson(res, 200, { ok: true, dir: outputDir(readConfig()), files: listGenerated(limit) })
-  }, auth)
-}
+// --- prompt library ----------------------------------------------------------------------------
 
-function fileRoute(auth) {
+function libraryRoute(auth) {
   return guarded(async (req, res) => {
-    if (req.method !== 'GET') return sendJson(res, 405, { ok: false, error: 'GET only' })
-    const url = new URL(req.url ?? '/', 'http://localhost')
-    const requested = url.searchParams.get('path') ?? ''
-    const file = readGeneratedFile(requested)
-    if (file === null) return sendJson(res, 404, { ok: false, error: 'no such generated file' })
-    res.statusCode = 200
-    res.setHeader('content-type', file.sniff?.mediaType ?? 'application/octet-stream')
-    res.setHeader('content-length', String(file.bytes.length))
-    res.setHeader('cache-control', 'private, max-age=60')
-    res.setHeader('x-content-type-options', 'nosniff')
-    res.end(file.bytes)
+    if (req.method === 'GET') {
+      sendJson(res, 200, { ok: true, ...readLibrary() })
+      return
+    }
+    if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'GET or POST only' })
+    const body = await readJsonBody(req)
+    const action = body.action ?? 'add'
+    if (action === 'add') {
+      sendJson(res, 200, { ok: true, prompt: addLibraryPrompt({ title: body.title, text: body.text }) })
+      return
+    }
+    if (action === 'remove') {
+      sendJson(res, 200, removeLibraryPrompt(String(body.id ?? '')))
+      return
+    }
+    sendJson(res, 400, { ok: false, error: `unknown action ${action}` })
   }, auth)
 }
 
@@ -454,17 +710,22 @@ function statsRoute(auth) {
     if (req.method !== 'GET') return sendJson(res, 405, { ok: false, error: 'GET only' })
     const config = readConfig()
     const state = readState()
+    const keys = activeKeys(config)
+    const pool = new KeyPool(keys, {
+      rotate: config.retry?.rotateKeys !== false,
+      cooldownMs: config.retry?.cooldownMs ?? 60000,
+    })
     sendJson(res, 200, {
       ok: true,
       baseUrl: baseUrl(config),
       outputDir: outputDir(config),
-      keyCount: activeKeys(config).length,
+      keyCount: keys.length,
       retry: config.retry,
       models: config.models,
+      sizes: sizesFor(config),
       lastRun: state.lastRun ?? null,
-      history: Array.isArray(state.history) ? state.history.slice(0, 20) : [],
-      files: listGenerated(8),
-      pool: new KeyPool(activeKeys(config), { rotate: config.retry?.rotateKeys !== false, cooldownMs: config.retry?.cooldownMs }).snapshot(),
+      versionCount: getWorkspace().versions.length,
+      pool: pool.snapshot(),
     })
   }, auth)
 }
@@ -473,22 +734,25 @@ function statsRoute(auth) {
 
 export function apply(ctx, config) {
   const disposers = []
-  const tools = createTools(ctx)
-  for (const definition of tools) {
+  for (const definition of createTools(ctx)) {
     disposers.push(ctx.tools.register(definition))
   }
 
   const auth = createHttpAuth(ctx, makePolicy(config))
   const routes = [
     [TOKEN_ROUTE, tokenRoute(auth)],
-    [CONFIG_ROUTE, configRoute(auth)],
+    [`${ROUTE_BASE}/config`, configRoute(auth)],
     [`${ROUTE_BASE}/keys`, keysRoute(auth)],
-    [TEST_ROUTE, testRoute(auth)],
-    [MODELS_ROUTE, modelsRoute(auth)],
-    [GENERATE_ROUTE, generateRoute(auth)],
-    [GALLERY_ROUTE, galleryRoute(auth)],
-    [FILE_ROUTE, fileRoute(auth)],
-    [STATS_ROUTE, statsRoute(auth)],
+    [`${ROUTE_BASE}/test`, testRoute(auth)],
+    [`${ROUTE_BASE}/models`, modelsRoute(auth)],
+    [`${ROUTE_BASE}/workspace`, workspaceRoute(auth)],
+    [`${ROUTE_BASE}/operations`, operationsRoute(auth)],
+    [`${ROUTE_BASE}/preview`, previewRoute(auth)],
+    [`${ROUTE_BASE}/recognise`, recogniseRoute(auth)],
+    [`${ROUTE_BASE}/asset`, assetRoute(auth)],
+    [`${ROUTE_BASE}/version.zip`, versionZipRoute(auth)],
+    [`${ROUTE_BASE}/library`, libraryRoute(auth)],
+    [`${ROUTE_BASE}/stats`, statsRoute(auth)],
   ]
 
   ctx.inject(['webServer'], (webCtx) => {
